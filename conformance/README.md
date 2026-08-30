@@ -39,6 +39,19 @@ conformance/
 Issue order is significant: the spec fixes it as declaration order, then unknown
 keys sorted, depth first.
 
+## `input_raw`, and why it has to exist
+
+A case may carry `input_raw`: the same payload as a **string of JSON text**.
+
+It is there because a runner has to read the case file with its own language's
+tools, and in JavaScript that means `JSON.parse`, which corrupts any integer
+past 2^53 while merely loading the test. A runner in such a language uses
+`input_raw` when it is present, so the bytes reach the binding exactly as
+written. Runners in languages with exact integers may ignore it.
+
+Only the cases that turn on precision carry it. That it is needed at all is the
+point the suite is making.
+
 ## Writing input in JSON
 
 JSON cannot express everything the cases need, so two conventions:

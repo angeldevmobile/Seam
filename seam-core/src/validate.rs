@@ -219,6 +219,14 @@ impl<'a> Validator<'a> {
     }
 
     fn integer<I: Input>(&mut self, ty: IntType, input: &I) {
+        if input.kind() == Kind::UnsafeInteger {
+            self.push(
+                Code::UnsafeInteger,
+                "arrived in a numeric type that cannot hold it exactly;                  send it as the host's arbitrary-precision integer"
+                    .to_string(),
+            );
+            return;
+        }
         if input.kind() == Kind::IntegerTooWide {
             self.push(
                 Code::IntegerTooWide,

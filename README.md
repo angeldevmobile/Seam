@@ -103,14 +103,16 @@ except ValidationError as e:
     print(e.path, e.code, e.message)          # "age", "out_of_range", "18 <= age <= 120"
 ```
 
-```typescript
-import { Schema } from "seam";
+```javascript
+const { Schema } = require("seam");
 
-const User = await Schema.load("contracts/user.seam");
-const user = User.validate(payload);          // throws SeamValidationError
+const User = Schema.load("contracts/user.seam").validator("User");
+const user = User.validate(rawRequestBody);   // throws SeamValidationError
+user.id;                                      // 9007199254740993n, a bigint, exact
 ```
 
-Same file. Same engine. Same verdict.
+Same file. Same engine. Same verdict. The conformance suite runs from Rust, Python and Node
+against those same case files, in CI, so "same verdict" is a test rather than a promise.
 
 ### Absence and nullability are orthogonal
 
@@ -239,10 +241,10 @@ and the full four-state absent/null matrix. A `.seam` parser, a JSON parser, idi
 through PyO3, generated `TypedDict`s, and the conformance suite running from both Rust and
 Python against the same files.
 
-**Phase 2: Node.js.** *Next.* The same surface via `napi-rs`, `bigint` for 64-bit integers,
-`Error` subclasses rather than generic throws, and the conformance suite green. This is the
-phase that makes the thesis demonstrable rather than merely argued: with one binding, "no drift"
-has nothing to drift against.
+**Phase 2: Node.js.** *Done.* The same surface via `napi-rs`, `bigint` for 64-bit integers, a
+real `Error` subclass with a real stack, `undefined` read as absence, and the conformance suite
+running from Node against the same files as Rust and Python. This is the phase that made the
+thesis demonstrable rather than merely argued.
 
 **Phase 3: WebAssembly.** Browser-side validation via `wasm-bindgen`, so a frontend enforces
 the same contract as the service it calls.
@@ -275,6 +277,7 @@ seam/
 │   ├── schema.rs         #   the compiled type model
 │   └── validate.rs       #   one walk, generic over the input
 ├── seam-py/              # PyO3 binding, abi3 wheels for 3.9+
+├── seam-js/              # napi-rs binding, bigint for 64-bit integers
 ├── seam-js/              # napi-rs binding      (phase 2)
 ├── seam-wasm/            # wasm-bindgen binding (phase 3)
 └── seam-jvm/             # Panama binding       (phase 5)
@@ -336,15 +339,16 @@ If you work in one language, use the native tool. Seam is for the seam between t
 Early development, and not yet published to crates.io or PyPI. Phase 1 is done.
 
 **What works today.** A `.seam` file parses, compiles and validates. Python gets an `abi3` wheel
-covering 3.9 and up, one call that takes a dict or raw JSON, values normalised on the way out,
-generated `TypedDict`s so a type checker can see the shape, and errors that cost nothing until
-they are read. The conformance suite runs from Rust and from Python against the same case files,
-in CI, on three operating systems.
+covering 3.9 and up and generated `TypedDict`s; Node gets a native module and `bigint` where a
+`number` would lie. Both take a dict or object, or raw JSON, in one call, normalise values on
+the way out, and build nothing for an error until something reads it. The conformance suite runs
+from Rust, Python and Node against the same case files, in CI, on three operating systems.
 
-**What is honest about it.** With one binding, "no drift" has nothing to drift against yet, so
-the differentiator this README argues for is real but not demonstrable. Unions, custom
-validators and framework integration do not exist. If you work in a single language today,
-pydantic or msgspec is the better tool and this README says so plainly further up.
+**What is honest about it.** Unions, custom validators, generated TypeScript types and framework
+integration do not exist. If you work in a single language today, pydantic or msgspec is the
+better tool and this README says so plainly further up. The reason to reach for Seam is the
+second language, and the measurement of whether it delivers is the conformance suite rather than
+anything argued here.
 
 The mapping specification in [`spec/`](spec/) and the suite in [`conformance/`](conformance/)
 are written alongside the engine rather than after it, and the numbers in

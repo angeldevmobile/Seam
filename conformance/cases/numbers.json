@@ -6,11 +6,13 @@
       "name": "u64 at the JS MAX_SAFE_INTEGER boundary is exact",
       "note": "JSON.parse corrupts this to ...992. A conformant runner must not.",
       "input": { "id": 9007199254740993, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "input_raw": "{\"id\": 9007199254740993, \"name\": \"Gabriel\", \"plan\": \"pro\", \"nickname\": null}",
       "expect": "valid"
     },
     {
       "name": "u64 at its maximum",
       "input": { "id": 18446744073709551615, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "input_raw": "{\"id\": 18446744073709551615, \"name\": \"Gabriel\", \"plan\": \"pro\", \"nickname\": null}",
       "expect": "valid"
     },
     {
@@ -22,6 +24,7 @@
       "name": "an integer wider than 64 bits is too wide, not out of range",
       "note": "2^64 needs 65 bits. A binding reports this while lowering, before the core ever sees a value, because the core's integer type cannot hold it.",
       "input": { "id": 18446744073709551616, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "input_raw": "{\"id\": 18446744073709551616, \"name\": \"Gabriel\", \"plan\": \"pro\", \"nickname\": null}",
       "expect": { "issues": [{ "path": "id", "code": "integer_too_wide" }] }
     },
     {

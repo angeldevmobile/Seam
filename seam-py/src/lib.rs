@@ -870,7 +870,12 @@ impl<'py> Out<'_, 'py> {
 
     fn plain_json(&self, r: &JsonRef<'_, '_>) -> PyResult<Bound<'py, PyAny>> {
         Ok(match r.kind() {
-            Kind::Null | Kind::IntegerTooWide | Kind::Foreign => self.py.None().into_bound(self.py),
+            // UnsafeInteger cannot arise here: Python's integers are exact, so
+            // nothing is lost before Seam sees the value. The arm exists
+            // because the core models the case for hosts where it can.
+            Kind::Null | Kind::IntegerTooWide | Kind::UnsafeInteger | Kind::Foreign => {
+                self.py.None().into_bound(self.py)
+            }
             Kind::Bool => r
                 .as_bool()
                 .unwrap_or_default()

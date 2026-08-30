@@ -32,6 +32,12 @@ Host representation:
 `Absent` is a Seam-provided sentinel, not `None`. A binding must not use the
 host's null to represent absence.
 
+**In JavaScript, `undefined` is absence.** A property holding `undefined` reads
+as not sent, which is already what `JSON.stringify` does with it; a property
+holding `null` is null. The three states the language has land on the two axes
+without needing a sentinel at all, which is the one place JavaScript is better
+shaped for this than Python.
+
 **Serialization.** A field that validated as absent must not be emitted. This is
 the rule that makes PATCH work: absent means *leave the stored value alone*,
 null means *set it to null*.
@@ -57,6 +63,13 @@ double before handing it to the core is non-conformant, because everything above
 reports `out_of_range` rather than wrapping.
 
 Integers wider than 64 bits are rejected with `integer_too_wide`.
+
+**An integer the host cannot hold exactly is rejected with `unsafe_integer`.**
+A JavaScript `number` past 2^53 is already not the value that was sent, and no
+check afterwards recovers it, so validating it would bless a wrong answer. This
+never arises in a language whose integers are exact, and it is why a binding
+should be handed raw bytes rather than values its own parser has already been
+through.
 
 ## 3. Floats
 
@@ -136,7 +149,7 @@ root. Rendered form: `user.tags[2]`.
 Validation reports every issue in one pass, never just the first.
 
 Codes: `required`, `null_not_allowed`, `type_mismatch`, `out_of_range`,
-`integer_too_wide`, `not_finite`, `too_short`, `too_long`, `too_few_items`,
+`unsafe_integer`, `integer_too_wide`, `not_finite`, `too_short`, `too_long`, `too_few_items`,
 `too_many_items`, `not_in_enum`, `invalid_date`, `invalid_datetime`,
 `missing_timezone`, `unknown_field`, `depth_exceeded`, `size_exceeded`,
 `unknown_type`.

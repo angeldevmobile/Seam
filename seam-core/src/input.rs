@@ -23,6 +23,12 @@ pub enum Kind {
     String,
     Array,
     Object,
+    /// An integer the host's own numeric type cannot represent exactly.
+    ///
+    /// A JavaScript `number` above 2^53 is already wrong by the time Seam sees
+    /// it. Nothing here can recover the value, so the only honest answer is to
+    /// say so rather than validate a number that is quietly not the one sent.
+    UnsafeInteger,
     /// A real integer, but wider than 64 bits, so the model cannot hold it.
     ///
     /// Its own kind rather than `Foreign` because truncating here is the exact
@@ -44,6 +50,7 @@ impl Kind {
             Kind::String => "string",
             Kind::Array => "array",
             Kind::Object => "object",
+            Kind::UnsafeInteger => "integer beyond exact precision",
             Kind::IntegerTooWide => "integer wider than 64 bits",
             Kind::Foreign => "unsupported value",
         }

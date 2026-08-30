@@ -44,6 +44,41 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo metadata --locked --format-version 1 > /dev/null
 
+  # seam-js is outside the workspace, so it needs its own lint pass.
+  node-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-js
+      - run: cargo fmt --all --check --manifest-path seam-js/Cargo.toml
+      - run: cargo clippy --manifest-path seam-js/Cargo.toml --all-targets -- -D warnings
+
+  # 18 and 22: the conformance suite has to agree with Rust and Python on every
+  # one of them, which is the only thing "no drift" can mean.
+  node:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["18", "22"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-js
+      - run: npm install
+        working-directory: seam-js
+      - run: npm run build
+        working-directory: seam-js
+      - run: npm test
+        working-directory: seam-js
+
   # seam-py is outside the workspace, so it needs its own lint pass.
   python-lint:
     runs-on: ubuntu-latest
