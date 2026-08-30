@@ -51,9 +51,22 @@ JSON cannot express everything the cases need, so two conventions:
 
 ## Running
 
-Not runnable yet: the cases refer to `.seam` files and the parser is not
-implemented. Until it is, the same assertions live as unit tests in
-`seam-core/src/validate.rs`, and this directory is the specification of what the
-runner will check.
+```bash
+cargo test --test conformance
+```
 
-Order of work: parser → runner in `seam-core` → runner in each binding.
+The reference runner is `seam-core/tests/conformance.rs`. It runs in CI, so a
+change that breaks a case fails the build.
+
+**Lowering is part of what is under test, not a detail of the harness.** A
+binding that corrupts an integer while converting its host's values is
+non-conformant even if the validator it calls is perfect. That is why
+`integer_too_wide` is produced during lowering rather than by the core: the
+core's integer type cannot hold a 65-bit value, so a binding has to catch it
+first. Every binding's runner has to do the same.
+
+The runner has a self-test (`the_harness_detects_a_wrong_expectation`) that
+feeds it a deliberately wrong expectation. A harness that cannot fail proves
+nothing.
+
+Remaining: a runner in each binding, sharing these files.

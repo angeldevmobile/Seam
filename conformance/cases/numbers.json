@@ -19,9 +19,10 @@
       "expect": { "issues": [{ "path": "id", "code": "out_of_range" }] }
     },
     {
-      "name": "u64 rejects one above its maximum",
+      "name": "an integer wider than 64 bits is too wide, not out of range",
+      "note": "2^64 needs 65 bits. A binding reports this while lowering, before the core ever sees a value, because the core's integer type cannot hold it.",
       "input": { "id": 18446744073709551616, "name": "Gabriel", "plan": "pro", "nickname": null },
-      "expect": { "issues": [{ "path": "id", "code": "out_of_range" }] }
+      "expect": { "issues": [{ "path": "id", "code": "integer_too_wide" }] }
     },
     {
       "name": "an integer type rejects a float",

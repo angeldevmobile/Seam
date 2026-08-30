@@ -18,5 +18,11 @@ authors.workspace = true
 # bindings, where the host type system actually lives.
 [dependencies]
 
+# Test-only. `arbitrary_precision` keeps the number literal as text instead of
+# routing it through f64, which is the property the conformance suite exists to
+# check: the runner must not corrupt an integer on the way in.
+[dev-dependencies]
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+
 [lints]
 workspace = true
