@@ -1,0 +1,57 @@
+{
+  "schema": "user",
+  "type": "User",
+  "cases": [
+    {
+      "name": "required and present",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "nullable field accepts an explicit null",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "nullable field is still required when absent",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro" },
+      "expect": { "issues": [{ "path": "nickname", "code": "required" }] }
+    },
+    {
+      "name": "optional field may be absent",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "optional field may not be null",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "bio": null },
+      "expect": { "issues": [{ "path": "bio", "code": "null_not_allowed" }] }
+    },
+    {
+      "name": "optional nullable accepts absent",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "optional nullable accepts null",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "avatar": null },
+      "expect": "valid"
+    },
+    {
+      "name": "unknown keys are rejected by default",
+      "input": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "surprise": true },
+      "expect": { "issues": [{ "path": "surprise", "code": "unknown_field" }] }
+    },
+    {
+      "name": "every issue is reported, not just the first",
+      "input": { "id": "x", "name": "ab", "plan": "platinum", "nickname": null },
+      "expect": {
+        "issues": [
+          { "path": "id", "code": "type_mismatch" },
+          { "path": "name", "code": "too_short" },
+          { "path": "plan", "code": "not_in_enum" }
+        ]
+      }
+    }
+  ]
+}

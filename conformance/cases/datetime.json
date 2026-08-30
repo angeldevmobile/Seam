@@ -1,0 +1,57 @@
+{
+  "schema": "user",
+  "type": "User",
+  "base": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+  "cases": [
+    {
+      "name": "a calendar date",
+      "input": { "signup_date": "2026-08-29" },
+      "expect": "valid"
+    },
+    {
+      "name": "leap day in a leap year",
+      "input": { "signup_date": "2024-02-29" },
+      "expect": "valid"
+    },
+    {
+      "name": "leap day in a century that is not a leap year",
+      "input": { "signup_date": "1900-02-29" },
+      "expect": { "issues": [{ "path": "signup_date", "code": "invalid_date" }] }
+    },
+    {
+      "name": "a date does not accept a time component",
+      "input": { "signup_date": "2026-08-29T00:00:00Z" },
+      "expect": { "issues": [{ "path": "signup_date", "code": "invalid_date" }] }
+    },
+    {
+      "name": "single-digit components are rejected",
+      "input": { "signup_date": "2026-8-29" },
+      "expect": { "issues": [{ "path": "signup_date", "code": "invalid_date" }] }
+    },
+    {
+      "name": "a datetime with Z",
+      "input": { "last_seen": "2026-08-29T14:30:00Z" },
+      "expect": "valid"
+    },
+    {
+      "name": "a datetime with a numeric offset",
+      "input": { "last_seen": "2026-08-29T14:30:00-05:00" },
+      "expect": "valid"
+    },
+    {
+      "name": "fractional seconds are accepted",
+      "input": { "last_seen": "2026-08-29T14:30:00.123456Z" },
+      "expect": "valid"
+    },
+    {
+      "name": "a naive datetime is an error, never a local-time guess",
+      "input": { "last_seen": "2026-08-29T14:30:00" },
+      "expect": { "issues": [{ "path": "last_seen", "code": "missing_timezone" }] }
+    },
+    {
+      "name": "a space instead of T is rejected",
+      "input": { "last_seen": "2026-08-29 14:30:00Z" },
+      "expect": { "issues": [{ "path": "last_seen", "code": "invalid_datetime" }] }
+    }
+  ]
+}

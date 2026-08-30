@@ -1,0 +1,15 @@
+[package]
+name = "seam-py"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Python bindings for the Seam validation engine."
+
+[lib]
+name = "_seam"
+crate-type = ["cdylib"]
+
+[dependencies]
+seam-core = { path = "../seam-core" }
+pyo3 = { version = "0.23", features = ["extension-module"] }

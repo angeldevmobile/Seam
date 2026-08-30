@@ -1,0 +1,20 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "seam"
+requires-python = ">=3.9"
+description = "One schema. Every language. No drift."
+license = { text = "MIT OR Apache-2.0" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+module-name = "seam._seam"
+python-source = "python"
+features = ["pyo3/extension-module"]

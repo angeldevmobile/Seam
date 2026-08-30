@@ -1,0 +1,22 @@
+[package]
+name = "seam-core"
+description = "The Seam validation engine: .seam parsing, schema compilation, and validation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# seam-core has no dependencies, on purpose.
+#
+# It is loaded into Python, Node, the browser and (later) the JVM. Every
+# transitive dependency is a dependency those hosts inherit, and a supply-chain
+# surface for a crate whose whole job is to be trustworthy about untrusted
+# input. Date handling is implemented here rather than pulled in for the same
+# reason; typed conversion to chrono/`datetime`/`Instant` happens in the
+# bindings, where the host type system actually lives.
+[dependencies]
+
+[lints]
+workspace = true

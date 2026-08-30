@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["seam-core"]
+
+# seam-py builds standalone via maturin and pulls pyo3, so it stays out of the
+# default build until Phase 1 core is frozen. Move it into `members` then.
+exclude = ["seam-py"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/USER/seam"
+authors = ["Seam contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+# A panic crossing an FFI boundary is a Seam bug, not a user error.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1

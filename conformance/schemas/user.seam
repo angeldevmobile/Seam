@@ -1,0 +1,14 @@
+schema User {
+  id:          u64
+  name:        String            @min_len(3) @max_len(64)
+  plan:        enum { free, pro, enterprise }
+
+  nickname:    String?
+  bio:         optional String
+  avatar:      optional String?
+
+  signup_date: optional Date
+  last_seen:   optional DateTime
+
+  tags:        optional [String] @max_items(10)
+}

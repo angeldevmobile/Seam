@@ -1,0 +1,37 @@
+{
+  "schema": "user",
+  "type": "User",
+  "cases": [
+    {
+      "name": "u64 at the JS MAX_SAFE_INTEGER boundary is exact",
+      "note": "JSON.parse corrupts this to ...992. A conformant runner must not.",
+      "input": { "id": 9007199254740993, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "u64 at its maximum",
+      "input": { "id": 18446744073709551615, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": "valid"
+    },
+    {
+      "name": "u64 rejects a negative",
+      "input": { "id": -1, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": { "issues": [{ "path": "id", "code": "out_of_range" }] }
+    },
+    {
+      "name": "u64 rejects one above its maximum",
+      "input": { "id": 18446744073709551616, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": { "issues": [{ "path": "id", "code": "out_of_range" }] }
+    },
+    {
+      "name": "an integer type rejects a float",
+      "input": { "id": 1.5, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": { "issues": [{ "path": "id", "code": "type_mismatch" }] }
+    },
+    {
+      "name": "an integer type rejects a numeric string",
+      "input": { "id": "1", "name": "Gabriel", "plan": "pro", "nickname": null },
+      "expect": { "issues": [{ "path": "id", "code": "type_mismatch" }] }
+    }
+  ]
+}
