@@ -49,7 +49,6 @@ def validate_{snake}(payload: object) -> {name}:
     return cast({name}, _SCHEMA.validate("{name}", payload))
 '''
 
-
 def _snake(name: str) -> str:
     out: list[str] = []
     for i, ch in enumerate(name):
@@ -90,7 +89,6 @@ def _annotate(ty: dict[str, Any]) -> str:
         return ty["object"]["name"]
     raise ValueError(f"unknown type kind: {kind!r}")
 
-
 def _field_annotation(field: dict[str, Any]) -> str:
     annotation = _annotate(field["type"])
     if field["nullable"]:
@@ -98,7 +96,6 @@ def _field_annotation(field: dict[str, Any]) -> str:
     if field["optional"]:
         annotation = f"NotRequired[{annotation}]"
     return annotation
-
 
 def _typed_dict(described: dict[str, Any]) -> str:
     name = described["name"]
@@ -108,7 +105,6 @@ def _typed_dict(described: dict[str, Any]) -> str:
     for field in described["fields"]:
         lines.append(f'    {field["name"]}: {_field_annotation(field)}')
     return "\n".join(lines)
-
 
 def generate(schema_path: Path | str) -> str:
     """Render the module source for one .seam file."""

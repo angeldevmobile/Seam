@@ -1,0 +1,82 @@
+{
+  "environment": {
+    "python": "3.13.2",
+    "implementation": "CPython",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+    "seam": "0.0.0",
+    "msgspec": "0.21.1",
+    "pydantic": "2.13.5"
+  },
+  "results": {
+    "flat": {
+      "seam": {
+        "median_ns": 3671.051025390625,
+        "min_ns": 3439.29443359375,
+        "stdev_ns": 255.13137220795664
+      },
+      "msgspec": {
+        "median_ns": 343.98345947265625,
+        "min_ns": 330.4405212402344,
+        "stdev_ns": 32.6435801402496
+      },
+      "pydantic": {
+        "median_ns": 1826.4678955078125,
+        "min_ns": 1707.3089599609375,
+        "stdev_ns": 658.2248447648765
+      }
+    },
+    "nested + date": {
+      "seam": {
+        "median_ns": 6031.732177734375,
+        "min_ns": 5621.10595703125,
+        "stdev_ns": 855.4820102772101
+      },
+      "msgspec": {
+        "median_ns": 938.4246826171875,
+        "min_ns": 611.1099243164062,
+        "stdev_ns": 140.6469487950334
+      },
+      "pydantic": {
+        "median_ns": 3389.80712890625,
+        "min_ns": 3331.94580078125,
+        "stdev_ns": 835.1541702830523
+      }
+    },
+    "array of 100": {
+      "seam": {
+        "median_ns": 24360.2294921875,
+        "min_ns": 20542.3583984375,
+        "stdev_ns": 6277.421102922974
+      },
+      "msgspec": {
+        "median_ns": 1368.701171875,
+        "min_ns": 1183.7234497070312,
+        "stdev_ns": 176.8080338871943
+      },
+      "pydantic": {
+        "median_ns": 4272.943115234375,
+        "min_ns": 3664.2333984375,
+        "stdev_ns": 1649.6009606967011
+      }
+    },
+    "rejected": {
+      "seam": {
+        "median_ns": 8530.89599609375,
+        "min_ns": 6394.39697265625,
+        "stdev_ns": 1603.2600647051472
+      },
+      "msgspec": {
+        "median_ns": 1217.5308227539062,
+        "min_ns": 1138.0477905273438,
+        "stdev_ns": 274.8591608986111
+      },
+      "pydantic": {
+        "median_ns": 3084.3719482421875,
+        "min_ns": 2489.7216796875,
+        "stdev_ns": 1074.295867691628
+      }
+    }
+  }
+}

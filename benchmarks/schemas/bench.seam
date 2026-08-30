@@ -1,0 +1,30 @@
+schema Address {
+  city: String @min_len(1) @max_len(64)
+  zip:  String @min_len(3) @max_len(10)
+}
+
+schema User {
+  id:     u64
+  name:   String @min_len(3) @max_len(64)
+  age:    u32    @range(0..=130)
+  plan:   enum { free, pro, enterprise }
+  active: bool
+  score:  f64
+}
+
+schema UserNested {
+  id:     u64
+  name:   String @min_len(3) @max_len(64)
+  age:    u32    @range(0..=130)
+  plan:   enum { free, pro, enterprise }
+  active: bool
+  score:  f64
+  home:   Address
+  joined: Date
+}
+
+schema UserArrays {
+  id:   u64
+  name: String   @min_len(3) @max_len(64)
+  tags: [String] @max_items(1000)
+}

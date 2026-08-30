@@ -157,18 +157,22 @@ commits to is the part everyone else leaves undocumented:
 "No drift" stops being a slogan the moment it becomes a test that can fail. That suite is the
 real deliverable, and it is what survives even if someone reimplements the engine.
 
-## Fast
+## Fast: not yet, and here are the numbers
 
 Seam compiles a schema once into a validator tree and reuses it across every call, so parsing
-and rule resolution happen at load time, not per payload. Validation walks the input directly
-instead of building an intermediate object graph to throw away, and work stays on the Rust side
-of the FFI boundary, so a rejected payload never has to be materialized in the host language.
+and rule resolution happen at load time rather than per payload. That part works.
 
-**No performance numbers are published yet, deliberately.** The frequently cited 5-50x figure
-from `pydantic-core` was measured against pure-Python Pydantic v1, and it does not transfer to a
-different engine with a different FFI shape. Seam will publish benchmarks with methodology,
-hardware, and reproduction scripts, measured against `msgspec` and `pydantic` v2, which are the
-real bar. Until then, treat speed as a design goal, not a claim.
+**The rest does not, and the benchmarks say so.** Validating a payload currently copies it into
+an intermediate representation before checking anything, and that copy costs roughly **10x
+msgspec and 2x pydantic v2**, rising to 18x on array-heavy payloads. Full methodology, hardware,
+library versions and a script that reproduces it are in [`benchmarks/`](benchmarks/).
+
+Removing that copy is the next piece of work. Until it lands, treat speed as a design goal that
+has not been delivered, and read the numbers rather than this paragraph.
+
+The 5-50x figure often quoted from `pydantic-core` was measured against pure-Python Pydantic v1
+and does not transfer to a different engine with a different FFI shape. Every number Seam
+publishes will come with the script that produced it.
 
 ## Safe
 

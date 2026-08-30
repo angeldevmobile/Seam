@@ -8,8 +8,11 @@ target/
 __pycache__/
 *.py[cod]
 .venv/
+# maturin develop drops the built extension into the source tree
 *.so
 *.pyd
+*.pdb
+*.dll
 dist/
 *.egg-info/
 
