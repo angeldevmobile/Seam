@@ -6,6 +6,8 @@ target/
 # versions every run. It does not constrain downstream consumers either way.
 
 __pycache__/
+.pytest_cache/
+.mypy_cache/
 *.py[cod]
 .venv/
 # maturin develop drops the built extension into the source tree

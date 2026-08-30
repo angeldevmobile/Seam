@@ -165,25 +165,53 @@ commits to is the part everyone else leaves undocumented:
 "No drift" stops being a slogan the moment it becomes a test that can fail. That suite is the
 real deliverable, and it is what survives even if someone reimplements the engine.
 
-## Fast: not yet, and here are the numbers
+## Fast, and here is what that means
 
-Seam compiles a schema once into a validator tree and reuses it across every call, so parsing
-and rule resolution happen at load time rather than per payload. That part works.
+Measured from raw JSON bytes, which is what a service actually holds when a request lands:
 
-**The rest is being worked on in the open, and the benchmarks say where it stands.** Seam
-validates the host's objects in place, with no intermediate copy, and resolves everything that
-does not depend on the payload when a validator is bound, parses JSON itself rather than trusting
-the host's parser, reads that JSON in place rather than copying it, and builds nothing for an
-error until something reads it. From raw bytes a flat payload is now **at parity with pydantic
-v2** and about **3.9x msgspec**, rising to 1.8x and 2.7x on array-heavy ones. msgspec remains
-faster in every scenario measured.
+| | seam | msgspec | pydantic v2 |
+|---|---:|---:|---:|
+| flat, 6 fields | 1 721 ns | **447** | 1 670 |
+| nested + a date | 3 039 ns | **643** | 2 484 |
+| array of 100 strings | 9 961 ns | **3 684** | 5 266 |
 
-Full methodology, hardware, library versions, the remaining plan and scripts that reproduce all
-of it are in [`benchmarks/`](benchmarks/). Read the numbers rather than this paragraph.
+**A flat payload is at parity with pydantic v2**, and about 3.9x msgspec. msgspec is faster in
+every scenario measured, and will stay that way: its fields are slots in a layout fixed at
+compile time, while a Seam schema is a file read at runtime. That is the price of the schema
+being portable, and it is the whole point rather than a defect.
+
+Four things earn those numbers, and each was measured on its own before it was kept:
+
+- **The schema compiles once.** Binding a validator resolves the type, the limits and the host
+  classes, so none of it is paid per call.
+- **Nothing is copied to be validated.** The engine is generic over an input trait, so it reads
+  the host's objects, or the JSON buffer, where they already are.
+- **Seam parses the JSON.** For correctness, as the next section explains, but it also removes
+  a whole pass and makes Seam faster from bytes than from a dict.
+- **An error costs nothing until it is read.** Rejecting builds one object; the paths, the issue
+  list and the message appear only if something asks.
+
+Full methodology, hardware, library versions, the things that were tried and removed for being
+unmeasurable, and scripts that reproduce all of it are in [`benchmarks/`](benchmarks/). Read the
+numbers rather than this paragraph.
 
 The 5-50x figure often quoted from `pydantic-core` was measured against pure-Python Pydantic v1
 and does not transfer to a different engine with a different FFI shape. Every number Seam
-publishes will come with the script that produced it.
+publishes comes with the script that produced it.
+
+### Why Seam parses the JSON itself
+
+Look again at the table at the top of this README. `JSON.parse` turns `9007199254740993` into
+`...992` before any validator is called, and no amount of checking afterwards brings the bits
+back. A library handed already-parsed host objects cannot keep the promise this project is
+built on.
+
+Python was generous about this: `json.loads` uses arbitrary-precision integers, so the dict path
+was already correct. That was the language rather than a design decision, and JavaScript is not
+generous. So Seam reads the bytes itself, applying its own rules about precision while it does.
+
+It parses in order to validate. There is no encoder, which is what keeps the line below about
+serialization true.
 
 ## Safe
 
@@ -204,13 +232,17 @@ Seam is deliberately narrow. It is **not** a replacement for Protobuf, OpenAPI, 
 validates data at a boundary and states precisely what that data means. The goal is to nail the
 cases that cause the most cross-language bugs, not to cover every schema feature.
 
-**Phase 1: Core + Python** *(current)*
+**Phase 1: Core + Python.** *Done.*
 Strings, integers with explicit width and signedness, `f64`, `bool`, `Date`, `DateTime`, enums
-with fixed value sets, arrays, arbitrarily nested objects, and the full four-state absent/null
-matrix. Idiomatic errors through PyO3. The conformance suite is established here.
+with fixed value sets, arrays with their own element nullability, arbitrarily nested objects,
+and the full four-state absent/null matrix. A `.seam` parser, a JSON parser, idiomatic errors
+through PyO3, generated `TypedDict`s, and the conformance suite running from both Rust and
+Python against the same files.
 
-**Phase 2: Node.js.** The same surface via `napi-rs`, `bigint` for 64-bit integers, `Error`
-subclasses rather than generic throws, and the conformance suite green.
+**Phase 2: Node.js.** *Next.* The same surface via `napi-rs`, `bigint` for 64-bit integers,
+`Error` subclasses rather than generic throws, and the conformance suite green. This is the
+phase that makes the thesis demonstrable rather than merely argued: with one binding, "no drift"
+has nothing to drift against.
 
 **Phase 3: WebAssembly.** Browser-side validation via `wasm-bindgen`, so a frontend enforces
 the same contract as the service it calls.
@@ -235,9 +267,14 @@ seam/
 ├── Cargo.toml            # workspace root
 ├── spec/                 # normative mapping specification
 ├── conformance/          # shared test cases, every binding runs these
-├── seam-core/            # the engine: .seam parser, compiler, validator, errors
-├── seam-macros/          # optional #[derive(Schema)] for Rust-first users
-├── seam-py/              # PyO3 binding
+├── benchmarks/           # numbers, methodology, and the scripts behind them
+├── seam-core/            # the engine
+│   ├── input.rs          #   what the validator needs from a payload
+│   ├── json.rs           #   JSON read in place, precision rules applied there
+│   ├── parser.rs         #   the .seam front end
+│   ├── schema.rs         #   the compiled type model
+│   └── validate.rs       #   one walk, generic over the input
+├── seam-py/              # PyO3 binding, abi3 wheels for 3.9+
 ├── seam-js/              # napi-rs binding      (phase 2)
 ├── seam-wasm/            # wasm-bindgen binding (phase 3)
 └── seam-jvm/             # Panama binding       (phase 5)
@@ -270,10 +307,11 @@ seam/
 `seam-py` starts growing validation logic of its own, that is a leak in `seam-core` to be fixed
 there.
 
-`seam-macros` is a separate crate because Rust requires proc macros to live in their own
-`proc-macro = true` crate. It is optional sugar: it emits the same schema representation the
-`.seam` parser produces, so Rust-first users get one source of truth without making Rust a
-prerequisite for everyone else.
+`seam-core` has **no dependencies**, and that is deliberate rather than incidental. It is loaded
+into Python, Node and the browser, so every transitive dependency would be one those three
+runtimes inherit, on a crate whose whole job is to be trustworthy about untrusted input. It is
+also why the JSON parser is written by hand: a general-purpose one would rebuild the
+intermediate tree the input trait exists to avoid, and would weigh on a WebAssembly build.
 
 ## Prior art, honestly
 
@@ -295,8 +333,23 @@ If you work in one language, use the native tool. Seam is for the seam between t
 
 ## Status
 
-Early development. Phase 1 in progress. Not yet published to crates.io or PyPI. The mapping
-specification and the conformance suite are being written alongside the engine, not after it.
+Early development, and not yet published to crates.io or PyPI. Phase 1 is done.
+
+**What works today.** A `.seam` file parses, compiles and validates. Python gets an `abi3` wheel
+covering 3.9 and up, one call that takes a dict or raw JSON, values normalised on the way out,
+generated `TypedDict`s so a type checker can see the shape, and errors that cost nothing until
+they are read. The conformance suite runs from Rust and from Python against the same case files,
+in CI, on three operating systems.
+
+**What is honest about it.** With one binding, "no drift" has nothing to drift against yet, so
+the differentiator this README argues for is real but not demonstrable. Unions, custom
+validators and framework integration do not exist. If you work in a single language today,
+pydantic or msgspec is the better tool and this README says so plainly further up.
+
+The mapping specification in [`spec/`](spec/) and the suite in [`conformance/`](conformance/)
+are written alongside the engine rather than after it, and the numbers in
+[`benchmarks/`](benchmarks/) are published with the scripts that produced them, including the
+runs that came out badly.
 
 ## License
 
