@@ -26,12 +26,12 @@ for k in (1, 6, 12):
     (d/f"s{k}.seam").write_text(f"schema T {{\n{fields}\n}}\n")
 
 payloads = {k: {f"f{i}": "value" for i in range(k)} for k in (1, 6, 12)}
-schemas  = {k: seam.Schema.load(d/f"s{k}.seam") for k in (1, 6, 12)}
+schemas  = {k: seam.Schema.load(d/f"s{k}.seam").validator("T") for k in (1, 6, 12)}
 
 print("--- seam: costo por cantidad de campos (String, sin reglas) ---")
 prev = None
 for k in (1, 6, 12):
-    ns = bench(lambda p, s=schemas[k]: s.validate("T", p), payloads[k])
+    ns = bench(schemas[k], payloads[k])
     marg = "" if prev is None else f"   (+{(ns-prev[1])/(k-prev[0]):.0f} ns/campo)"
     print(f"  {k:>2} campos: {ns:>8.0f} ns{marg}")
     prev = (k, ns)
@@ -44,11 +44,11 @@ print(f"  len(p), llamada trivial : {bench(len, p6):>8.1f} ns")
 
 print("\n--- arrays: costo por elemento ---")
 (d/"arr.seam").write_text("schema T {\n  xs: [String] @max_items(10000)\n}\n")
-sa = seam.Schema.load(d/"arr.seam")
+sa = seam.Schema.load(d/"arr.seam").validator("T")
 prev = None
 for n in (10, 100, 1000):
     pl = {"xs": [f"t{i}" for i in range(n)]}
-    ns = bench(lambda p: sa.validate("T", p), pl, repeats=5, n=2000)
+    ns = bench(sa, pl, repeats=5, n=2000)
     marg = "" if prev is None else f"   (+{(ns-prev[1])/(n-prev[0]):.1f} ns/elem)"
     print(f"  {n:>5} elem: {ns:>9.0f} ns{marg}")
     prev = (n, ns)

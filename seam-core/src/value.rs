@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::input::Kind;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
@@ -50,13 +52,13 @@ impl From<u64> for Int {
 /// What a field found at its key. Absence and null are separate states here;
 /// collapsing them is the bug this type exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Slot<'a> {
+pub enum Slot<T> {
     Absent,
     Null,
-    Present(&'a Value),
+    Present(T),
 }
 
-impl<'a> Slot<'a> {
+impl<'a> Slot<&'a Value> {
     pub fn read(object: &'a BTreeMap<String, Value>, key: &str) -> Self {
         match object.get(key) {
             None => Slot::Absent,
@@ -76,6 +78,82 @@ impl Value {
             Value::String(_) => "string",
             Value::Array(_) => "array",
             Value::Object(_) => "object",
+        }
+    }
+}
+
+impl crate::input::Input for Value {
+    type Child<'a> = &'a Value;
+
+    fn kind(&self) -> Kind {
+        match self {
+            Value::Null => Kind::Null,
+            Value::Bool(_) => Kind::Bool,
+            Value::Int(_) => Kind::Int,
+            Value::Float(_) => Kind::Float,
+            Value::String(_) => Kind::String,
+            Value::Array(_) => Kind::Array,
+            Value::Object(_) => Kind::Object,
+        }
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    fn as_int(&self) -> Option<Int> {
+        match self {
+            Value::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Float(f) => Some(*f),
+            // An integer is an acceptable float.
+            Value::Int(n) => Some(n.as_i128() as f64),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> Option<std::borrow::Cow<'_, str>> {
+        match self {
+            Value::String(s) => Some(std::borrow::Cow::Borrowed(s)),
+            _ => None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Array(items) => items.len(),
+            Value::Object(map) => map.len(),
+            _ => 0,
+        }
+    }
+
+    fn item(&self, index: usize) -> Option<&Value> {
+        match self {
+            Value::Array(items) => items.get(index),
+            _ => None,
+        }
+    }
+
+    fn slot(&self, key: &str) -> Slot<&Value> {
+        match self {
+            Value::Object(map) => Slot::read(map, key),
+            _ => Slot::Absent,
+        }
+    }
+
+    fn each_key(&self, f: &mut dyn FnMut(&str)) {
+        if let Value::Object(map) = self {
+            for k in map.keys() {
+                f(k);
+            }
         }
     }
 }

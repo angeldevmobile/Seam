@@ -21,6 +21,7 @@
 
 pub mod datetime;
 pub mod error;
+pub mod input;
 pub mod limits;
 pub mod parser;
 pub mod schema;

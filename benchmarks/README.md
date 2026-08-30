@@ -16,19 +16,19 @@ Median nanoseconds per validation of an already-parsed dict. Lower is better.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 2 704 | **331** | 1 665 |
-| nested + date | 4 938 | **501** | 2 847 |
-| array of 100 strings | 15 906 | **817** | 2 964 |
-| rejected payload | 4 054 | **907** | 1 970 |
+| flat, 6 fields | 2 825 | **373** | 1 688 |
+| nested + date | 4 852 | **505** | 2 712 |
+| array of 100 strings | 10 769 | **829** | 3 050 |
+| rejected payload | 4 312 | **1 133** | 2 040 |
 
 Relative to the fastest in each row:
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 8.2x | 1.00x | 5.0x |
-| nested + date | 9.9x | 1.00x | 5.7x |
-| array of 100 strings | 19.5x | 1.00x | 3.6x |
-| rejected payload | 4.5x | 1.00x | 2.2x |
+| flat, 6 fields | 7.6x | 1.00x | 4.5x |
+| nested + date | 9.6x | 1.00x | 5.4x |
+| array of 100 strings | 13.0x | 1.00x | 3.7x |
+| rejected payload | 3.8x | 1.00x | 1.8x |
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
@@ -82,22 +82,17 @@ three libraries quietly doing different work is worse than no benchmark.
 
 ## Where seam's own time goes
 
-From `profile.py`, before any optimisation:
+`profile.py` separates the cost that does not depend on the payload from the
+cost that scales with it.
 
-```
- 1 field :  1558 ns
- 6 fields:  3745 ns   (+437 ns/field)
-12 fields:  7058 ns   (+552 ns/field)
+| | before any work | after steps 1 and 2 |
+|---|---:|---:|
+| fixed, per call | ~1 100 ns | **~280 ns** |
+| per field | ~440 ns | **~390 ns** |
+| per array element | ~123-163 ns | **~91-98 ns** |
 
-dict(p), 6 keys      :  93 ns
-dict comprehension   : 431 ns   (~72 ns/key)
-```
-
-Two findings. About **1 100 ns was fixed cost**, paid before touching any data:
-msgspec's entire flat validation is 344 ns, less than a third of that. And the
-**~440 ns per field** is roughly six times what rebuilding the dict costs in
-pure Python, because a `String` is copied Python to Rust and back: two
-allocations and two memcpys for bytes that never changed.
+For scale, a pure-Python dict comprehension over the same six keys costs about
+380 ns, or ~63 ns per key. Seam is still six times that per field.
 
 ## Progress
 
@@ -121,28 +116,47 @@ data there is.
 `schema.validate(type, payload)` still exists and still works; it now builds a
 validator and discards it, which is exactly the "unbound" column above.
 
-### 2. Validate directly against the host's objects — next
+### 2. Validate directly against the host's objects — done
 
-Make `seam-core` generic over an input trait that `Value` implements and each
-binding implements for its own runtime, so no intermediate copy is built. This
-is what `pydantic-core` does. The array row barely moved in step 1, which
-confirms its cost is per element, and this is what addresses that.
+`seam-core::validate` is generic over an `Input` trait. `Value` implements it,
+and `seam-py` implements it for `Bound<'py, PyAny>`, so no intermediate copy is
+built. Values that need no conversion are handed back as the very object that
+arrived, rather than rebuilt.
 
-### 3. Skip rebuilding the output when nothing needs normalising
+It delivered where it was aimed and not elsewhere:
 
-A schema with no `Date` or `DateTime` field produces an output dict identical to
-the input, built key by key for nothing. Aliasing the input instead of copying
-it is a semantic decision to take deliberately, not a micro-optimisation to
-sneak in.
+- **array elements: ~35% cheaper.** The copy really was the cost there.
+- **object fields: ~12% cheaper.** Barely anything.
 
-### 4. Cache interned `Py<PyString>` keys per field
+That gap is the finding. An object field is no longer paying for a copy, so
+what remains must be something else, and it is: **two Python strings are created
+per field per call**, one to look the key up in the input and one to write it
+into the output. Twelve string objects for a six-field payload. That is step 3
+below, which this measurement promotes from polish to the main remaining win for
+object payloads.
 
-Rather than creating a Python string for every key on every call. Interned
-strings carry a precomputed hash, so this is a win rather than a wash, but it
-will be measured with `ab.py` like everything else.
+The rejected row also refused to move, and for its own reason: at 4 312 ns it is
+*more expensive than the valid path*, because nothing is built for the result
+but an exception is. Constructing `ValidationError`, the list, the `Issue`
+objects and their attributes costs more than validating six fields. Seam's error
+contract is richer than msgspec's message string, and this is its price;
+building the issues lazily is the obvious lever and has not been tried.
 
-Whether Seam ends up ahead of pydantic v2 after 2 and 3 has not been measured
-and will not be guessed at here.
+### 3. Cache interned `Py<PyString>` keys per field — next
+
+A field's name is known when the validator is bound, so the Python string for it
+can be built once instead of twice per call. Interned strings also carry a
+precomputed hash. Promoted above the item below on the strength of the
+measurement in step 2.
+
+### 4. Build validation issues lazily
+
+The rejected path pays full price for a structured error even when the caller
+only reads `str(e)`. Deferring the `Issue` objects until `.issues` is touched
+would leave the contract intact and stop charging for it up front.
+
+Whether Seam ends up ahead of pydantic v2 has not been measured and will not be
+guessed at here. It is now within 1.8x on the rejected row and 4.5x on flat.
 
 ## Caveats
 

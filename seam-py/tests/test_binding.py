@@ -160,10 +160,17 @@ def test_type_names(user):
     assert user.type_names() == ["User"]
 
 
-def test_an_unsupported_python_type_is_a_type_error(user):
-    with pytest.raises(TypeError) as excinfo:
-        user.validate("User", {**base(), "name": {1, 2}})
-    assert "cannot cross a Seam boundary" in str(excinfo.value)
+def test_an_unsupported_python_type_is_a_validation_issue(user):
+    """A `set` in a payload is reported like any other bad value, with a path.
+
+    It used to raise TypeError, which aborted on the first one and carried the
+    location only inside a message. As an issue it joins the rest of the report
+    and its path is structured, which is worth more than matching Python's
+    convention of TypeError for a wrong type.
+    """
+    found = codes(user, {**base(), "name": {1, 2}, "plan": "platinum"})
+    assert ("name", "type_mismatch") in found
+    assert ("plan", "not_in_enum") in found, "reporting must not stop at the set"
 
 
 # --- bound validator --------------------------------------------------------

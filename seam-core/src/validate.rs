@@ -1,21 +1,26 @@
-use std::collections::BTreeMap;
+//! One walk over the payload, reading it in place.
+//!
+//! Generic over [`Input`] so a binding validates its host's own objects without
+//! copying them into a [`Value`] first. Everything here reads; nothing here
+//! allocates a representation of the payload.
 
 use crate::datetime::{validate_date, validate_datetime};
 use crate::error::{Code, Issue, Path, Segment, ValidationError};
+use crate::input::{Input, Kind};
 use crate::limits::Limits;
 use crate::schema::{Field, IntType, ObjectType, Presence, Rule, Schema, Type};
 use crate::value::{Int, Slot, Value};
 
-pub fn validate(
+pub fn validate<I: Input>(
     schema: &Schema,
     type_name: &str,
-    value: &Value,
+    input: &I,
     limits: Limits,
 ) -> Result<(), ValidationError> {
     let mut v = Validator { schema, limits, path: Vec::new(), issues: Vec::new() };
 
     match schema.get(type_name) {
-        Some(ty) => v.object(ty, value, 0),
+        Some(ty) => v.object(ty, input, 0),
         None => v.push(
             Code::UnknownType,
             format!("schema declares no type named `{type_name}`"),
@@ -59,24 +64,28 @@ impl Validator<'_> {
         true
     }
 
-    fn object(&mut self, ty: &ObjectType, value: &Value, depth: usize) {
+    fn mismatch<I: Input>(&mut self, expected: &str, got: &I) {
+        self.push(
+            Code::TypeMismatch,
+            format!("expected {expected}, found {}", got.kind().name()),
+        );
+    }
+
+    fn object<I: Input>(&mut self, ty: &ObjectType, input: &I, depth: usize) {
         if !self.depth_ok(depth) {
             return;
         }
-        let Value::Object(map) = value else {
-            self.push(
-                Code::TypeMismatch,
-                format!("expected object, found {}", value.kind()),
-            );
+        if input.kind() != Kind::Object {
+            self.mismatch("object", input);
             return;
-        };
+        }
 
-        if map.len() > self.limits.max_object_keys {
+        if input.len() > self.limits.max_object_keys {
             self.push(
                 Code::SizeExceeded,
                 format!(
                     "{} keys exceeds the limit of {}",
-                    map.len(),
+                    input.len(),
                     self.limits.max_object_keys
                 ),
             );
@@ -84,24 +93,30 @@ impl Validator<'_> {
         }
 
         for field in &ty.fields {
-            self.field(field, map, depth);
+            self.field(field, input, depth);
         }
 
         if ty.deny_unknown_fields {
-            let owner = ty.name.clone();
-            for key in map.keys() {
+            // Collected first because the callback cannot borrow `self` while
+            // it is already borrowed to walk the input.
+            let mut unknown = Vec::new();
+            input.each_key(&mut |key| {
                 if ty.field(key).is_none() {
-                    let message = format!("`{owner}` declares no field named `{key}`");
-                    self.within(Segment::Key(key.clone()), |v| {
-                        v.push(Code::UnknownField, message);
-                    });
+                    unknown.push(key.to_string());
                 }
+            });
+            let owner = ty.name.clone();
+            for key in unknown {
+                let message = format!("`{owner}` declares no field named `{key}`");
+                self.within(Segment::Key(key), |v| {
+                    v.push(Code::UnknownField, message);
+                });
             }
         }
     }
 
-    fn field(&mut self, field: &Field, map: &BTreeMap<String, Value>, depth: usize) {
-        let slot = Slot::read(map, &field.name);
+    fn field<I: Input>(&mut self, field: &Field, input: &I, depth: usize) {
+        let slot = input.slot(&field.name);
         self.within(Segment::Key(field.name.clone()), |v| match slot {
             Slot::Absent => {
                 if !field.presence.optional {
@@ -114,52 +129,61 @@ impl Validator<'_> {
                 }
             }
             Slot::Present(value) => {
-                v.value(&field.ty, value, depth + 1);
-                v.rules(&field.rules, value);
+                v.value(&field.ty, &value, depth + 1);
+                v.rules(&field.rules, &value);
             }
         });
     }
 
-    fn value(&mut self, ty: &Type, value: &Value, depth: usize) {
+    fn value<I: Input>(&mut self, ty: &Type, input: &I, depth: usize) {
         // Applies to every string-shaped type, so it is checked once here
         // rather than in each of String, Date, DateTime and Enum.
-        if let Value::String(s) = value {
-            if s.len() > self.limits.max_string_bytes {
-                self.push(
-                    Code::SizeExceeded,
-                    format!(
-                        "{} bytes exceeds the limit of {}",
-                        s.len(),
-                        self.limits.max_string_bytes
-                    ),
-                );
-                return;
+        if input.kind() == Kind::String {
+            if let Some(s) = input.as_str() {
+                if s.len() > self.limits.max_string_bytes {
+                    self.push(
+                        Code::SizeExceeded,
+                        format!(
+                            "{} bytes exceeds the limit of {}",
+                            s.len(),
+                            self.limits.max_string_bytes
+                        ),
+                    );
+                    return;
+                }
             }
         }
 
         match ty {
-            Type::Bool => self.expect(matches!(value, Value::Bool(_)), "bool", value),
-            Type::Float => match value {
-                Value::Float(f) if f.is_finite() => {}
-                Value::Float(_) => self.push(
-                    Code::NotFinite,
-                    "NaN and infinity are not valid values".to_string(),
-                ),
-                // An integer is an acceptable float; the reverse is not.
-                Value::Int(_) => {}
-                other => self.expect(false, "float", other),
-            },
-            Type::String => self.expect(matches!(value, Value::String(_)), "string", value),
-            Type::Int(int_ty) => self.integer(*int_ty, value),
-            Type::Date => self.temporal(value, "date", validate_date),
-            Type::DateTime => self.temporal(value, "datetime", validate_datetime),
-            Type::Enum(allowed) => self.enumeration(allowed, value),
-            Type::Array { item, item_nullable } => {
-                self.array(item, *item_nullable, value, depth);
+            Type::Bool => {
+                if input.as_bool().is_none() {
+                    self.mismatch("bool", input);
+                }
             }
-            Type::Object(obj) => self.object(obj, value, depth),
+            Type::Float => match input.kind() {
+                Kind::Int => {}
+                Kind::Float => match input.as_f64() {
+                    Some(f) if f.is_finite() => {}
+                    _ => self.push(
+                        Code::NotFinite,
+                        "NaN and infinity are not valid values".to_string(),
+                    ),
+                },
+                _ => self.mismatch("float", input),
+            },
+            Type::String => {
+                if input.kind() != Kind::String {
+                    self.mismatch("string", input);
+                }
+            }
+            Type::Int(int_ty) => self.integer(*int_ty, input),
+            Type::Date => self.temporal(input, "date", validate_date),
+            Type::DateTime => self.temporal(input, "datetime", validate_datetime),
+            Type::Enum(allowed) => self.enumeration(allowed, input),
+            Type::Array { item, item_nullable } => self.array(item, *item_nullable, input, depth),
+            Type::Object(obj) => self.object(obj, input, depth),
             Type::Ref(name) => match self.schema.get(name) {
-                Some(obj) => self.object(obj, value, depth),
+                Some(obj) => self.object(obj, input, depth),
                 None => self.push(
                     Code::UnknownType,
                     format!("schema declares no type named `{name}`"),
@@ -168,18 +192,16 @@ impl Validator<'_> {
         }
     }
 
-    fn expect(&mut self, ok: bool, expected: &str, value: &Value) {
-        if !ok {
+    fn integer<I: Input>(&mut self, ty: IntType, input: &I) {
+        if input.kind() == Kind::IntegerTooWide {
             self.push(
-                Code::TypeMismatch,
-                format!("expected {expected}, found {}", value.kind()),
+                Code::IntegerTooWide,
+                "integer is wider than 64 bits".to_string(),
             );
+            return;
         }
-    }
-
-    fn integer(&mut self, ty: IntType, value: &Value) {
-        let Value::Int(n) = value else {
-            self.expect(false, ty.name(), value);
+        let Some(n) = input.as_int() else {
+            self.mismatch(ty.name(), input);
             return;
         };
         let (min, max) = ty.range();
@@ -192,12 +214,17 @@ impl Validator<'_> {
         }
     }
 
-    fn temporal(&mut self, value: &Value, expected: &str, check: fn(&str) -> Result<(), Code>) {
-        let Value::String(s) = value else {
-            self.expect(false, expected, value);
+    fn temporal<I: Input>(
+        &mut self,
+        input: &I,
+        expected: &str,
+        check: fn(&str) -> Result<(), Code>,
+    ) {
+        let Some(s) = input.as_str() else {
+            self.mismatch(expected, input);
             return;
         };
-        if let Err(code) = check(s) {
+        if let Err(code) = check(&s) {
             let message = match code {
                 Code::MissingTimezone => {
                     format!("`{s}` has no UTC offset; Seam does not assume local time")
@@ -208,12 +235,12 @@ impl Validator<'_> {
         }
     }
 
-    fn enumeration(&mut self, allowed: &[String], value: &Value) {
-        let Value::String(s) = value else {
-            self.expect(false, "string", value);
+    fn enumeration<I: Input>(&mut self, allowed: &[String], input: &I) {
+        let Some(s) = input.as_str() else {
+            self.mismatch("string", input);
             return;
         };
-        if !allowed.iter().any(|a| a == s) {
+        if !allowed.iter().any(|a| a.as_str() == s.as_ref()) {
             self.push(
                 Code::NotInEnum,
                 format!("`{s}` is not one of: {}", allowed.join(", ")),
@@ -221,83 +248,90 @@ impl Validator<'_> {
         }
     }
 
-    fn array(&mut self, item: &Type, item_nullable: bool, value: &Value, depth: usize) {
+    fn array<I: Input>(&mut self, item: &Type, item_nullable: bool, input: &I, depth: usize) {
         if !self.depth_ok(depth) {
             return;
         }
-        let Value::Array(items) = value else {
-            self.expect(false, "array", value);
+        if input.kind() != Kind::Array {
+            self.mismatch("array", input);
             return;
-        };
-        if items.len() > self.limits.max_items {
+        }
+        let len = input.len();
+        if len > self.limits.max_items {
             self.push(
                 Code::SizeExceeded,
-                format!(
-                    "{} items exceeds the limit of {}",
-                    items.len(),
-                    self.limits.max_items
-                ),
+                format!("{len} items exceeds the limit of {}", self.limits.max_items),
             );
             return;
         }
-        for (i, v) in items.iter().enumerate() {
-            self.within(Segment::Index(i), |validator| match v {
-                Value::Null if item_nullable => {}
-                Value::Null => validator.push(
+        for i in 0..len {
+            let Some(child) = input.item(i) else { continue };
+            self.within(Segment::Index(i), |v| match child.kind() {
+                Kind::Null if item_nullable => {}
+                Kind::Null => v.push(
                     Code::NullNotAllowed,
                     "must not be null; declare the element as `T?` to allow it".to_string(),
                 ),
-                v => validator.value(item, v, depth + 1),
+                _ => v.value(item, &child, depth + 1),
             });
         }
     }
 
-    fn rules(&mut self, rules: &[Rule], value: &Value) {
+    fn rules<I: Input>(&mut self, rules: &[Rule], input: &I) {
+        // Counted once: `as_str` may decode, and asking per rule would pay for
+        // it twice on a field carrying both bounds.
+        let chars = rules
+            .iter()
+            .any(|r| matches!(r, Rule::MinLen(_) | Rule::MaxLen(_)))
+            .then(|| input.as_str().map(|s| s.chars().count()))
+            .flatten();
+
         for rule in rules {
-            match (rule, value) {
-                (Rule::MinLen(n), Value::String(s)) => {
-                    let len = s.chars().count();
-                    if len < *n {
-                        self.push(
-                            Code::TooShort,
-                            format!("length {len} is below the minimum of {n}"),
-                        );
+            match rule {
+                Rule::MinLen(n) => {
+                    if let Some(len) = chars {
+                        if len < *n {
+                            self.push(
+                                Code::TooShort,
+                                format!("length {len} is below the minimum of {n}"),
+                            );
+                        }
                     }
                 }
-                (Rule::MaxLen(n), Value::String(s)) => {
-                    let len = s.chars().count();
-                    if len > *n {
-                        self.push(
-                            Code::TooLong,
-                            format!("length {len} exceeds the maximum of {n}"),
-                        );
+                Rule::MaxLen(n) => {
+                    if let Some(len) = chars {
+                        if len > *n {
+                            self.push(
+                                Code::TooLong,
+                                format!("length {len} exceeds the maximum of {n}"),
+                            );
+                        }
                     }
                 }
-                (Rule::Range { min, max }, Value::Int(n)) => {
-                    let v = n.as_i128();
-                    if v < *min || v > *max {
-                        self.push(Code::OutOfRange, format!("{v} is outside {min}..={max}"));
+                Rule::Range { min, max } => {
+                    if let Some(n) = input.as_int() {
+                        let v = n.as_i128();
+                        if v < *min || v > *max {
+                            self.push(Code::OutOfRange, format!("{v} is outside {min}..={max}"));
+                        }
                     }
                 }
-                (Rule::MinItems(n), Value::Array(items)) => {
-                    if items.len() < *n {
+                Rule::MinItems(n) => {
+                    if input.kind() == Kind::Array && input.len() < *n {
                         self.push(
                             Code::TooFewItems,
-                            format!("{} items is below the minimum of {n}", items.len()),
+                            format!("{} items is below the minimum of {n}", input.len()),
                         );
                     }
                 }
-                (Rule::MaxItems(n), Value::Array(items)) => {
-                    if items.len() > *n {
+                Rule::MaxItems(n) => {
+                    if input.kind() == Kind::Array && input.len() > *n {
                         self.push(
                             Code::TooManyItems,
-                            format!("{} items exceeds the maximum of {n}", items.len()),
+                            format!("{} items exceeds the maximum of {n}", input.len()),
                         );
                     }
                 }
-                // A rule that does not apply to this kind is silent: the type
-                // check already reported the mismatch.
-                _ => {}
             }
         }
     }
@@ -329,6 +363,7 @@ impl From<Int> for Value {
 mod tests {
     use super::*;
     use crate::schema::IntWidth;
+    use std::collections::BTreeMap;
 
     fn user_schema() -> Schema {
         let user = ObjectType {

@@ -3,16 +3,16 @@
 //! belongs in this file.
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyTypeError};
+use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use seam_core::error::Segment;
+use seam_core::input::{Input, Kind};
 use seam_core::schema::{ObjectType, Rule, Type};
-use seam_core::value::Int;
-use seam_core::{Code, Path, Value};
+use seam_core::value::{Int, Slot};
 
 create_exception!(_seam, ValidationError, PyException);
 create_exception!(_seam, ParseError, PyException);
@@ -151,8 +151,10 @@ impl Schema {
         Ok(Validator {
             schema: Arc::clone(&self.inner),
             type_name: type_name.to_string(),
-            date_cls: datetime.getattr("date")?.unbind(),
-            datetime_cls: datetime.getattr("datetime")?.unbind(),
+            classes: Classes {
+                date: datetime.getattr("date")?.unbind(),
+                datetime: datetime.getattr("datetime")?.unbind(),
+            },
             limits: limits.map_or(seam_core::Limits::DEFAULT, |l| l.inner),
         })
     }
@@ -182,10 +184,9 @@ impl Schema {
 pub struct Validator {
     schema: Arc<seam_core::Schema>,
     type_name: String,
-    // Resolved once. `Py<T>` is immutable here, so sharing a validator across
+    // Resolved once. Immutable after binding, so sharing a validator across
     // threads carries no synchronisation of its own.
-    date_cls: Py<PyAny>,
-    datetime_cls: Py<PyAny>,
+    classes: Classes,
     limits: seam_core::Limits,
 }
 
@@ -212,13 +213,6 @@ impl Validator {
 impl Validator {
     fn run<'py>(&self, payload: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = payload.py();
-        let ctx = Ctx {
-            py,
-            // A refcount bump, not an import: the classes were resolved when
-            // the validator was bound.
-            date_cls: self.date_cls.bind(py).clone(),
-            datetime_cls: self.datetime_cls.bind(py).clone(),
-        };
 
         let Some(object_type) = self.schema.get(&self.type_name) else {
             return Err(ValidationError::new_err(format!(
@@ -227,16 +221,11 @@ impl Validator {
             )));
         };
 
-        // Lowering is part of the contract, not a harness detail: an integer
-        // Python can hold but the model cannot is caught here, before the
-        // engine ever sees it.
-        let value = match ctx.lower(payload, &mut Vec::new()) {
-            Ok(v) => v,
-            Err(LowerErr::Py(e)) => return Err(e),
-            Err(LowerErr::Issue(issue)) => return Err(raise(py, vec![issue])),
-        };
+        // Read in place. Nothing is copied before the rules run, so a rejected
+        // payload is never materialised at all.
+        let input = PyInput::new(payload.clone(), &self.classes);
 
-        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &value, self.limits) {
+        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
             let issues = e
                 .issues
                 .into_iter()
@@ -249,7 +238,7 @@ impl Validator {
             return Err(raise(py, issues));
         }
 
-        ctx.object_to_python(&self.schema, object_type, &value)
+        Out { py, schema: &self.schema, classes: &self.classes }.object(object_type, payload)
     }
 }
 
@@ -379,127 +368,207 @@ fn raise(py: Python<'_>, issues: Vec<Issue>) -> PyErr {
     err
 }
 
-enum LowerErr {
-    Py(PyErr),
-    Issue(Issue),
+/// The `datetime` classes, resolved once when a validator is bound.
+struct Classes {
+    date: Py<PyAny>,
+    datetime: Py<PyAny>,
 }
 
-impl From<PyErr> for LowerErr {
-    fn from(e: PyErr) -> Self {
-        LowerErr::Py(e)
+/// A Python object the engine reads in place.
+///
+/// No copy is made: `kind` is computed once on construction because the
+/// validator asks for it more than once, and everything else reads through to
+/// the object itself.
+struct PyInput<'a, 'py> {
+    ob: Bound<'py, PyAny>,
+    classes: &'a Classes,
+    kind: Kind,
+}
+
+impl<'a, 'py> PyInput<'a, 'py> {
+    fn new(ob: Bound<'py, PyAny>, classes: &'a Classes) -> Self {
+        let kind = classify(&ob, classes);
+        PyInput { ob, classes, kind }
+    }
+
+    fn child(&self, ob: Bound<'py, PyAny>) -> PyInput<'a, 'py> {
+        PyInput::new(ob, self.classes)
     }
 }
 
-/// Holds the `datetime` classes so they are imported once per call rather than
-/// once per value.
-struct Ctx<'py> {
+/// The order here is the whole correctness story of this file.
+///
+/// `bool` is a subclass of `int` in Python and `datetime` is a subclass of
+/// `date`, so checking the general case first would silently turn every `True`
+/// into `1` and every timestamp into a calendar day.
+fn classify(ob: &Bound<'_, PyAny>, classes: &Classes) -> Kind {
+    if ob.is_none() {
+        return Kind::Null;
+    }
+    if ob.is_instance_of::<PyBool>() {
+        return Kind::Bool;
+    }
+    if ob.is_instance_of::<PyInt>() {
+        // Python integers are unbounded; the model stops at 64 bits. Saying so
+        // here is what keeps a 65-bit value from being truncated into a
+        // plausible-looking one.
+        return if ob.extract::<i64>().is_ok() || ob.extract::<u64>().is_ok() {
+            Kind::Int
+        } else {
+            Kind::IntegerTooWide
+        };
+    }
+    if ob.is_instance_of::<PyString>() {
+        return Kind::String;
+    }
+    if ob.is_instance_of::<PyFloat>() {
+        return Kind::Float;
+    }
+    if ob.is_instance_of::<PyDict>() {
+        return Kind::Object;
+    }
+    if ob.is_instance_of::<PyList>() || ob.is_instance_of::<PyTuple>() {
+        return Kind::Array;
+    }
+    let py = ob.py();
+    // A date reaches the engine as its wire form, so the same rules apply to a
+    // `datetime.date` as to the string a JSON payload would have carried.
+    if matches!(ob.is_instance(classes.datetime.bind(py)), Ok(true))
+        || matches!(ob.is_instance(classes.date.bind(py)), Ok(true))
+    {
+        return Kind::String;
+    }
+    Kind::Foreign
+}
+
+impl<'a, 'py> Input for PyInput<'a, 'py> {
+    type Child<'x>
+        = PyInput<'a, 'py>
+    where
+        Self: 'x;
+
+    fn kind(&self) -> Kind {
+        self.kind
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        if self.kind == Kind::Bool {
+            self.ob.extract().ok()
+        } else {
+            None
+        }
+    }
+
+    fn as_int(&self) -> Option<Int> {
+        if self.kind != Kind::Int {
+            return None;
+        }
+        if let Ok(n) = self.ob.extract::<i64>() {
+            return Some(Int::Signed(n));
+        }
+        self.ob.extract::<u64>().ok().map(Int::Unsigned)
+    }
+
+    fn as_f64(&self) -> Option<f64> {
+        match self.kind {
+            Kind::Float => self.ob.extract().ok(),
+            Kind::Int => self.ob.extract::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> Option<Cow<'_, str>> {
+        if self.kind != Kind::String {
+            return None;
+        }
+        if let Ok(s) = self.ob.cast::<PyString>() {
+            // Borrowed where the interpreter can lend its buffer. Forcing an
+            // owned String here would allocate on every call, and the validator
+            // asks more than once per value.
+            return s.to_cow().ok();
+        }
+        // A date or datetime: hand the engine the wire form and let its rules
+        // decide, rather than teaching this file what a valid date is.
+        let iso = self.ob.call_method0("isoformat").ok()?;
+        iso.extract::<String>().ok().map(Cow::Owned)
+    }
+
+    fn len(&self) -> usize {
+        match self.kind {
+            Kind::Array | Kind::Object => self.ob.len().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    fn item(&self, index: usize) -> Option<Self::Child<'_>> {
+        if self.kind != Kind::Array {
+            return None;
+        }
+        self.ob.get_item(index).ok().map(|v| self.child(v))
+    }
+
+    fn slot(&self, key: &str) -> Slot<Self::Child<'_>> {
+        if self.kind != Kind::Object {
+            return Slot::Absent;
+        }
+        let Ok(dict) = self.ob.cast::<PyDict>() else {
+            return Slot::Absent;
+        };
+        match dict.get_item(key) {
+            Ok(Some(v)) if v.is_none() => Slot::Null,
+            Ok(Some(v)) => Slot::Present(self.child(v)),
+            _ => Slot::Absent,
+        }
+    }
+
+    fn each_key(&self, f: &mut dyn FnMut(&str)) {
+        if self.kind != Kind::Object {
+            return;
+        }
+        let Ok(dict) = self.ob.cast::<PyDict>() else {
+            return;
+        };
+        for (k, _) in dict.iter() {
+            match k.extract::<String>() {
+                Ok(s) => f(&s),
+                // A non-string key matches no field, so reporting it as unknown
+                // beats letting it through unseen.
+                Err(_) => f(&k.str().map_or_else(|_| "<key>".into(), |s| s.to_string())),
+            }
+        }
+    }
+}
+
+/// Builds the result from the payload and the schema.
+///
+/// Only values that need converting are rebuilt. A string, an int or a bool
+/// comes back as the very object that arrived, so the common case costs a
+/// refcount instead of an allocation and a copy.
+struct Out<'a, 'py> {
     py: Python<'py>,
-    date_cls: Bound<'py, PyAny>,
-    datetime_cls: Bound<'py, PyAny>,
+    schema: &'a seam_core::Schema,
+    classes: &'a Classes,
 }
 
-impl<'py> Ctx<'py> {
-    fn lower(&self, ob: &Bound<'py, PyAny>, path: &mut Vec<Segment>) -> Result<Value, LowerErr> {
-        if ob.is_none() {
-            return Ok(Value::Null);
-        }
-        // Before int: in Python `bool` is a subclass of `int`, so checking int
-        // first would turn every True into 1.
-        if ob.is_instance_of::<PyBool>() {
-            return Ok(Value::Bool(ob.extract::<bool>()?));
-        }
-        if ob.is_instance_of::<PyInt>() {
-            return self.lower_int(ob, path);
-        }
-        if ob.is_instance_of::<PyFloat>() {
-            return Ok(Value::Float(ob.extract::<f64>()?));
-        }
-        if ob.is_instance_of::<PyString>() {
-            return Ok(Value::String(ob.extract::<String>()?));
-        }
-        // Before date: `datetime` is a subclass of `date`, so checking date
-        // first would truncate every timestamp to a calendar day.
-        if ob.is_instance(&self.datetime_cls)? {
-            let iso: String = ob.call_method0("isoformat")?.extract()?;
-            return Ok(Value::String(iso));
-        }
-        if ob.is_instance(&self.date_cls)? {
-            let iso: String = ob.call_method0("isoformat")?.extract()?;
-            return Ok(Value::String(iso));
-        }
-        if ob.is_instance_of::<PyList>() || ob.is_instance_of::<PyTuple>() {
-            let mut out = Vec::new();
-            for (i, item) in ob.try_iter()?.enumerate() {
-                path.push(Segment::Index(i));
-                let lowered = self.lower(&item?, path);
-                path.pop();
-                out.push(lowered?);
-            }
-            return Ok(Value::Array(out));
-        }
-        if let Ok(dict) = ob.cast::<PyDict>() {
-            let mut out = std::collections::BTreeMap::new();
-            for (k, v) in dict.iter() {
-                let key: String = k.extract().map_err(|_| {
-                    PyErr::new::<PyTypeError, _>("object keys must be strings".to_string())
-                })?;
-                path.push(Segment::Key(key.clone()));
-                let lowered = self.lower(&v, path);
-                path.pop();
-                out.insert(key, lowered?);
-            }
-            return Ok(Value::Object(out));
-        }
-
-        let name = ob.get_type().name()?;
-        Err(LowerErr::Py(PyErr::new::<PyTypeError, _>(format!(
-            "{} cannot cross a Seam boundary at `{}`; \
-             payloads hold null, bool, int, float, str, date, datetime, list and dict",
-            name,
-            Path(path.clone()).render()
-        ))))
-    }
-
-    fn lower_int(&self, ob: &Bound<'py, PyAny>, path: &mut [Segment]) -> Result<Value, LowerErr> {
-        if let Ok(n) = ob.extract::<i64>() {
-            return Ok(Value::Int(Int::Signed(n)));
-        }
-        if let Ok(n) = ob.extract::<u64>() {
-            return Ok(Value::Int(Int::Unsigned(n)));
-        }
-        // Python integers are arbitrary precision; the model stops at 64 bits.
-        // Truncating here would be the exact bug Seam exists to prevent.
-        Err(LowerErr::Issue(Issue {
-            path: Path(path.to_vec()).render(),
-            code: Code::IntegerTooWide.as_str().to_string(),
-            message: "integer is wider than 64 bits".to_string(),
-        }))
-    }
-
-    fn object_to_python(
-        &self,
-        schema: &seam_core::Schema,
-        ty: &ObjectType,
-        value: &Value,
-    ) -> PyResult<Bound<'py, PyAny>> {
+impl<'py> Out<'_, 'py> {
+    fn object(&self, ty: &ObjectType, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let out = PyDict::new(self.py);
-        let Value::Object(map) = value else {
+        let Ok(dict) = ob.cast::<PyDict>() else {
             return Ok(out.into_any());
         };
 
         for field in &ty.fields {
-            // An absent key stays absent. That is the whole point: `"bio" in
-            // result` is how a caller reads absence, and writing None here
-            // would collapse it into null.
-            if let Some(v) = map.get(&field.name) {
-                out.set_item(&field.name, self.to_python(schema, &field.ty, v)?)?;
+            // An absent key stays absent. `"bio" in result` is how a caller
+            // reads absence, and writing None here would collapse it into null.
+            if let Ok(Some(v)) = dict.get_item(&field.name) {
+                out.set_item(&field.name, self.value(&field.ty, &v)?)?;
             }
         }
 
         if !ty.deny_unknown_fields {
-            for (k, v) in map {
-                if ty.field(k).is_none() {
-                    out.set_item(k, self.untyped_to_python(v)?)?;
+            for (k, v) in dict.iter() {
+                if !matches!(k.extract::<String>(), Ok(name) if ty.field(&name).is_some()) {
+                    out.set_item(k, v)?;
                 }
             }
         }
@@ -507,59 +576,64 @@ impl<'py> Ctx<'py> {
         Ok(out.into_any())
     }
 
-    fn to_python(
-        &self,
-        schema: &seam_core::Schema,
-        ty: &Type,
-        value: &Value,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        if matches!(value, Value::Null) {
-            return Ok(self.py.None().into_bound(self.py));
+    fn value(&self, ty: &Type, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        if ob.is_none() {
+            return Ok(ob.clone());
         }
-        match (ty, value) {
-            (Type::Date, Value::String(s)) => self.date_cls.call_method1("fromisoformat", (s,)),
-            (Type::DateTime, Value::String(s)) => self
-                .datetime_cls
-                .call_method1("fromisoformat", (python_iso(s),)),
-            (Type::Array { item, .. }, Value::Array(items)) => {
+        match ty {
+            Type::Date => self.date(ob),
+            Type::DateTime => self.datetime(ob),
+            Type::Array { item, .. } if needs_rebuilding(item, self.schema) => {
                 let list = PyList::empty(self.py);
-                for v in items {
-                    list.append(self.to_python(schema, item, v)?)?;
+                for v in ob.try_iter()? {
+                    list.append(self.value(item, &v?)?)?;
                 }
                 Ok(list.into_any())
             }
-            (Type::Object(obj), _) => self.object_to_python(schema, obj, value),
-            (Type::Ref(name), _) => match schema.get(name) {
-                Some(obj) => self.object_to_python(schema, obj, value),
-                None => self.untyped_to_python(value),
+            Type::Object(obj) => self.object(obj, ob),
+            Type::Ref(name) => match self.schema.get(name) {
+                Some(obj) => self.object(obj, ob),
+                None => Ok(ob.clone()),
             },
-            _ => self.untyped_to_python(value),
+            // Nothing to convert: hand back what arrived.
+            _ => Ok(ob.clone()),
         }
     }
 
-    fn untyped_to_python(&self, value: &Value) -> PyResult<Bound<'py, PyAny>> {
-        Ok(match value {
-            Value::Null => self.py.None().into_bound(self.py),
-            Value::Bool(b) => b.into_pyobject(self.py)?.to_owned().into_any(),
-            Value::Int(Int::Signed(n)) => n.into_pyobject(self.py)?.into_any(),
-            Value::Int(Int::Unsigned(n)) => n.into_pyobject(self.py)?.into_any(),
-            Value::Float(f) => f.into_pyobject(self.py)?.into_any(),
-            Value::String(s) => s.into_pyobject(self.py)?.into_any(),
-            Value::Array(items) => {
-                let list = PyList::empty(self.py);
-                for v in items {
-                    list.append(self.untyped_to_python(v)?)?;
-                }
-                list.into_any()
-            }
-            Value::Object(map) => {
-                let d = PyDict::new(self.py);
-                for (k, v) in map {
-                    d.set_item(k, self.untyped_to_python(v)?)?;
-                }
-                d.into_any()
-            }
-        })
+    fn date(&self, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let date_cls = self.classes.date.bind(self.py);
+        // Already a `date` and not a `datetime`: nothing to build.
+        if matches!(ob.is_instance(date_cls), Ok(true))
+            && !matches!(
+                ob.is_instance(self.classes.datetime.bind(self.py)),
+                Ok(true)
+            )
+        {
+            return Ok(ob.clone());
+        }
+        let s: String = ob.extract()?;
+        date_cls.call_method1("fromisoformat", (s,))
+    }
+
+    fn datetime(&self, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let datetime_cls = self.classes.datetime.bind(self.py);
+        if matches!(ob.is_instance(datetime_cls), Ok(true)) {
+            return Ok(ob.clone());
+        }
+        let s: String = ob.extract()?;
+        datetime_cls.call_method1("fromisoformat", (python_iso(&s),))
+    }
+}
+
+/// Whether a type's values ever come back as something other than what arrived.
+///
+/// Answering no lets a whole array or field skip reconstruction entirely.
+fn needs_rebuilding(ty: &Type, schema: &seam_core::Schema) -> bool {
+    match ty {
+        Type::Date | Type::DateTime | Type::Object(_) => true,
+        Type::Array { item, .. } => needs_rebuilding(item, schema),
+        Type::Ref(name) => schema.get(name).is_some(),
+        _ => false,
     }
 }
 
