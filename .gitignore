@@ -1,6 +1,9 @@
 /target
 **/*.rs.bk
-Cargo.lock
+
+# Cargo.lock is committed on purpose. The old advice was to ignore it in
+# libraries; current Cargo guidance is to commit it so CI resolves the same
+# versions every run. It does not constrain downstream consumers either way.
 
 __pycache__/
 *.py[cod]
