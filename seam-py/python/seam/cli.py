@@ -31,7 +31,11 @@ def _typegen(args: argparse.Namespace) -> int:
             continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(rendered, encoding="utf-8", newline="\n")
+        # `open`, not `write_text`: the latter only grew a `newline` argument
+        # in 3.10, and the generated file has to carry the same bytes on every
+        # platform or `--check` would fail over a line ending.
+        with target.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(rendered)
         print(f"wrote {target}")
 
     return status
