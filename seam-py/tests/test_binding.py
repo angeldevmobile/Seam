@@ -164,3 +164,51 @@ def test_an_unsupported_python_type_is_a_type_error(user):
     with pytest.raises(TypeError) as excinfo:
         user.validate("User", {**base(), "name": {1, 2}})
     assert "cannot cross a Seam boundary" in str(excinfo.value)
+
+
+# --- bound validator --------------------------------------------------------
+
+
+def test_a_bound_validator_agrees_with_the_convenience_path(user):
+    bound = user.validator("User")
+    payload = {**base(), "signup_date": "2026-08-29"}
+    assert bound(payload) == user.validate("User", payload)
+    assert bound.validate(payload) == bound(payload)
+
+
+def test_a_bound_validator_reports_the_same_issues(user):
+    bound = user.validator("User")
+    with pytest.raises(ValidationError) as excinfo:
+        bound({**base(), "name": "ab"})
+    assert excinfo.value.code == "too_short"
+
+
+def test_binding_an_unknown_type_fails_at_bind_time(user):
+    """Not on the first call: a typo should surface where it was written."""
+    with pytest.raises(ValidationError):
+        user.validator("Nope")
+
+
+def test_a_bound_validator_carries_its_limits(user):
+    strict = user.validator("User", Limits(max_items=1))
+    with pytest.raises(ValidationError) as excinfo:
+        strict({**base(), "tags": ["a", "b"]})
+    assert excinfo.value.code == "size_exceeded"
+
+    assert strict({**base(), "tags": ["a"]}) is not None
+
+
+def test_a_bound_validator_exposes_its_type(user):
+    bound = user.validator("User")
+    assert bound.type_name == "User"
+    assert "User" in repr(bound)
+
+
+def test_the_generated_module_binds_once(tmp_path):
+    from seam.typegen import generate
+
+    seam_file = tmp_path / "u.seam"
+    seam_file.write_text("schema U { x: String }\n", encoding="utf-8")
+    body = generate(seam_file)
+    assert '.validator("U")' in body
+    assert ".validate(" not in body

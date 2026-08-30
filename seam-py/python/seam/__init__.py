@@ -23,11 +23,13 @@ from ._seam import (
     ParseError,
     Schema,
     ValidationError,
+    Validator,
     __version__,
 )
 
 __all__ = [
     "Schema",
+    "Validator",
     "Limits",
     "Issue",
     "ValidationError",

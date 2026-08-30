@@ -63,6 +63,14 @@ SCHEMA = HERE / "schemas" / "bench.seam"
 
 _seam_schema = seam.Schema.load(SCHEMA)
 
+# Bound once, at import. This is the fair comparison: msgspec's Struct and
+# pydantic's BaseModel are also defined once, at class-definition time. Calling
+# `schema.validate(type_name, payload)` in the loop would make Seam re-resolve
+# per call something the other two resolved before the clock started.
+_seam_user = _seam_schema.validator("User")
+_seam_nested = _seam_schema.validator("UserNested")
+_seam_arrays = _seam_schema.validator("UserArrays")
+
 
 class MsAddress(Struct, forbid_unknown_fields=True):
     city: Annotated[str, Meta(min_length=1, max_length=64)]
@@ -172,25 +180,22 @@ def catching(fn: Callable[[Any], Any]) -> Callable[[Any], Any]:
 def scenarios() -> dict[str, dict[str, tuple[Callable[[Any], Any], Any]]]:
     return {
         "flat": {
-            "seam": (lambda p: _seam_schema.validate("User", p), flat()),
+            "seam": (_seam_user, flat()),
             "msgspec": (lambda p: msgspec.convert(p, MsUser), flat()),
             "pydantic": (PyUser.model_validate, flat()),
         },
         "nested + date": {
-            "seam": (lambda p: _seam_schema.validate("UserNested", p), nested()),
+            "seam": (_seam_nested, nested()),
             "msgspec": (lambda p: msgspec.convert(p, MsUserNested), nested()),
             "pydantic": (PyUserNested.model_validate, nested()),
         },
         "array of 100": {
-            "seam": (lambda p: _seam_schema.validate("UserArrays", p), arrays(100)),
+            "seam": (_seam_arrays, arrays(100)),
             "msgspec": (lambda p: msgspec.convert(p, MsUserArrays), arrays(100)),
             "pydantic": (PyUserArrays.model_validate, arrays(100)),
         },
         "rejected": {
-            "seam": (
-                catching(lambda p: _seam_schema.validate("User", p)),
-                invalid(),
-            ),
+            "seam": (catching(_seam_user), invalid()),
             "msgspec": (catching(lambda p: msgspec.convert(p, MsUser)), invalid()),
             "pydantic": (catching(PyUser.model_validate), invalid()),
         },

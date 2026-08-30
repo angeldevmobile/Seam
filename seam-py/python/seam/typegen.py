@@ -43,10 +43,15 @@ _SCHEMA = Schema.load(Path(__file__).parent / "{schema_file}")
 '''
 
 VALIDATOR = '''
+# Bound once at import: the type lookup and the datetime classes are resolved
+# here rather than on every call.
+_{upper} = _SCHEMA.validator("{name}")
+
 
 def validate_{snake}(payload: object) -> {name}:
     """Validate against `{name}` in {schema_file}."""
-    return cast({name}, _SCHEMA.validate("{name}", payload))
+    return cast({name}, _{upper}(payload))
+
 '''
 
 def _snake(name: str) -> str:
@@ -120,7 +125,10 @@ def generate(schema_path: Path | str) -> str:
     for name in sorted(described):
         parts.append(
             VALIDATOR.format(
-                snake=_snake(name), name=name, schema_file=schema_path.name
+                snake=_snake(name),
+                upper=_snake(name).upper(),
+                name=name,
+                schema_file=schema_path.name,
             )
         )
     return "".join(parts)

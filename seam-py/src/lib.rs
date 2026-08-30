@@ -7,6 +7,8 @@ use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
+use std::sync::Arc;
+
 use seam_core::error::Segment;
 use seam_core::schema::{ObjectType, Rule, Type};
 use seam_core::value::Int;
@@ -87,7 +89,9 @@ impl Limits {
 
 #[pyclass(module = "seam")]
 pub struct Schema {
-    inner: seam_core::Schema,
+    // Shared with every Validator bound to it, so binding one costs a refcount
+    // rather than a copy of the schema.
+    inner: Arc<seam_core::Schema>,
 }
 
 #[pymethods]
@@ -95,7 +99,7 @@ impl Schema {
     #[staticmethod]
     fn parse(source: &str) -> PyResult<Schema> {
         match seam_core::parse(source) {
-            Ok(inner) => Ok(Schema { inner }),
+            Ok(inner) => Ok(Schema { inner: Arc::new(inner) }),
             Err(e) => Err(ParseError::new_err(e.to_string())),
         }
     }
@@ -104,7 +108,7 @@ impl Schema {
     fn load(path: std::path::PathBuf) -> PyResult<Schema> {
         let source = std::fs::read_to_string(&path)?;
         match seam_core::parse(&source) {
-            Ok(inner) => Ok(Schema { inner }),
+            Ok(inner) => Ok(Schema { inner: Arc::new(inner) }),
             Err(e) => Err(ParseError::new_err(format!("{}: {e}", path.display()))),
         }
     }
@@ -126,6 +130,37 @@ impl Schema {
         Ok(out)
     }
 
+    /// Binds one type for repeated validation.
+    ///
+    /// Everything that does not depend on the payload is resolved here instead
+    /// of on every call: the type lookup, the `datetime` classes, the limits.
+    /// Prefer this wherever the same type is validated more than once.
+    #[pyo3(signature = (type_name, limits=None))]
+    fn validator(
+        &self,
+        py: Python<'_>,
+        type_name: &str,
+        limits: Option<&Limits>,
+    ) -> PyResult<Validator> {
+        if self.inner.get(type_name).is_none() {
+            return Err(ValidationError::new_err(format!(
+                "schema declares no type named `{type_name}`"
+            )));
+        }
+        let datetime = py.import("datetime")?;
+        Ok(Validator {
+            schema: Arc::clone(&self.inner),
+            type_name: type_name.to_string(),
+            date_cls: datetime.getattr("date")?.unbind(),
+            datetime_cls: datetime.getattr("datetime")?.unbind(),
+            limits: limits.map_or(seam_core::Limits::DEFAULT, |l| l.inner),
+        })
+    }
+
+    /// Convenience for one-off validation.
+    ///
+    /// Builds a [`Validator`] and discards it, so it pays the binding cost on
+    /// every call. In a loop, bind once with `validator()` instead.
     #[pyo3(signature = (type_name, payload, limits=None))]
     fn validate<'py>(
         &self,
@@ -133,13 +168,64 @@ impl Schema {
         payload: &Bound<'py, PyAny>,
         limits: Option<&Limits>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let py = payload.py();
-        let ctx = Ctx::new(py)?;
-        let limits = limits.map_or(seam_core::Limits::DEFAULT, |l| l.inner);
+        self.validator(payload.py(), type_name, limits)?
+            .run(payload)
+    }
 
-        let object_type = self.inner.get(type_name).ok_or_else(|| {
-            ValidationError::new_err(format!("schema declares no type named `{type_name}`"))
-        })?;
+    fn __repr__(&self) -> String {
+        format!("Schema(types={:?})", self.type_names())
+    }
+}
+
+/// One type of one schema, ready to validate.
+#[pyclass(module = "seam")]
+pub struct Validator {
+    schema: Arc<seam_core::Schema>,
+    type_name: String,
+    // Resolved once. `Py<T>` is immutable here, so sharing a validator across
+    // threads carries no synchronisation of its own.
+    date_cls: Py<PyAny>,
+    datetime_cls: Py<PyAny>,
+    limits: seam_core::Limits,
+}
+
+#[pymethods]
+impl Validator {
+    fn __call__<'py>(&self, payload: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        self.run(payload)
+    }
+
+    fn validate<'py>(&self, payload: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        self.run(payload)
+    }
+
+    #[getter]
+    fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Validator({})", self.type_name)
+    }
+}
+
+impl Validator {
+    fn run<'py>(&self, payload: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let py = payload.py();
+        let ctx = Ctx {
+            py,
+            // A refcount bump, not an import: the classes were resolved when
+            // the validator was bound.
+            date_cls: self.date_cls.bind(py).clone(),
+            datetime_cls: self.datetime_cls.bind(py).clone(),
+        };
+
+        let Some(object_type) = self.schema.get(&self.type_name) else {
+            return Err(ValidationError::new_err(format!(
+                "schema declares no type named `{}`",
+                self.type_name
+            )));
+        };
 
         // Lowering is part of the contract, not a harness detail: an integer
         // Python can hold but the model cannot is caught here, before the
@@ -150,7 +236,7 @@ impl Schema {
             Err(LowerErr::Issue(issue)) => return Err(raise(py, vec![issue])),
         };
 
-        if let Err(e) = seam_core::validate(&self.inner, type_name, &value, limits) {
+        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &value, self.limits) {
             let issues = e
                 .issues
                 .into_iter()
@@ -163,11 +249,7 @@ impl Schema {
             return Err(raise(py, issues));
         }
 
-        ctx.object_to_python(&self.inner, object_type, &value)
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Schema(types={:?})", self.type_names())
+        ctx.object_to_python(&self.schema, object_type, &value)
     }
 }
 
@@ -317,15 +399,6 @@ struct Ctx<'py> {
 }
 
 impl<'py> Ctx<'py> {
-    fn new(py: Python<'py>) -> PyResult<Self> {
-        let m = py.import("datetime")?;
-        Ok(Ctx {
-            py,
-            date_cls: m.getattr("date")?,
-            datetime_cls: m.getattr("datetime")?,
-        })
-    }
-
     fn lower(&self, ob: &Bound<'py, PyAny>, path: &mut Vec<Segment>) -> Result<Value, LowerErr> {
         if ob.is_none() {
             return Ok(Value::Null);
@@ -527,6 +600,7 @@ fn python_iso(s: &str) -> String {
 fn _seam(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add_class::<Schema>()?;
+    m.add_class::<Validator>()?;
     m.add_class::<Issue>()?;
     m.add_class::<Limits>()?;
     m.add("ValidationError", py.get_type::<ValidationError>())?;
