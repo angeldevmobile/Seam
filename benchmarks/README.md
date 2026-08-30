@@ -16,27 +16,28 @@ Median nanoseconds per validation of an already-parsed dict. Lower is better.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 2 825 | **373** | 1 688 |
-| nested + date | 4 852 | **505** | 2 712 |
-| array of 100 strings | 10 769 | **829** | 3 050 |
-| rejected payload | 4 312 | **1 133** | 2 040 |
+| flat, 6 fields | 1 919 | **344** | 1 662 |
+| nested + date | 3 858 | **498** | 2 891 |
+| array of 100 strings | 10 419 | **862** | 3 011 |
+| rejected payload | 3 655 | **957** | 2 145 |
 
 Relative to the fastest in each row:
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 7.6x | 1.00x | 4.5x |
-| nested + date | 9.6x | 1.00x | 5.4x |
-| array of 100 strings | 13.0x | 1.00x | 3.7x |
-| rejected payload | 3.8x | 1.00x | 1.8x |
+| flat, 6 fields | 5.6x | 1.00x | 4.8x |
+| nested + date | 7.7x | 1.00x | 5.8x |
+| array of 100 strings | 12.1x | 1.00x | 3.5x |
+| rejected payload | 3.8x | 1.00x | 2.2x |
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
-2.13.5. Nine repeats per cell, each at least 50 ms, median reported. Two
-consecutive runs agreed within a few percent.
+2.13.5. Nine repeats per cell, each at least 50 ms, median reported.
 
-**Seam is the slowest of the three in every scenario.** That is still the
-finding.
+Across three runs the flat row came out at 1 919, 2 339 and 1 902 ns against
+pydantic's 1 662, 1 778 and 1 756, so **Seam is somewhere between 1.1x and 1.3x
+pydantic's cost on a flat payload**, not at parity with it. Every row is still
+slower than both competitors.
 
 ## Why cross-run comparison is not allowed here
 
@@ -85,14 +86,14 @@ three libraries quietly doing different work is worse than no benchmark.
 `profile.py` separates the cost that does not depend on the payload from the
 cost that scales with it.
 
-| | before any work | after steps 1 and 2 |
+| | before any work | now |
 |---|---:|---:|
-| fixed, per call | ~1 100 ns | **~280 ns** |
-| per field | ~440 ns | **~390 ns** |
-| per array element | ~123-163 ns | **~91-98 ns** |
+| fixed, per call | ~1 100 ns | **~250 ns** |
+| per field | ~440 ns | **~300-330 ns** |
+| per array element | ~123-163 ns | **~95-107 ns** |
 
 For scale, a pure-Python dict comprehension over the same six keys costs about
-380 ns, or ~63 ns per key. Seam is still six times that per field.
+380 ns, or ~63 ns per key. Seam is still roughly five times that per field.
 
 ## Progress
 
@@ -142,21 +143,39 @@ objects and their attributes costs more than validating six fields. Seam's error
 contract is richer than msgspec's message string, and this is its price;
 building the issues lazily is the obvious lever and has not been tried.
 
-### 3. Cache interned `Py<PyString>` keys per field — next
+### 3. Stop paying for the error path on the happy path — done
 
-A field's name is known when the validator is bound, so the Python string for it
-can be built once instead of twice per call. Interned strings also carry a
-precomputed hash. Promoted above the item below on the strength of the
-measurement in step 2.
+Two changes, measured separately.
 
-### 4. Build validation issues lazily
+**A borrowed path, in `seam-core`.** The validator used to clone a field's name
+into an owned `Segment` for every field of every payload, so that a path would
+be ready if something went wrong. On a valid payload nothing ever read it. The
+path now borrows from the schema and is materialised only when an issue is
+actually recorded. Worth ~380 to ~365 ns per field and ~95 to ~87 ns per array
+element, and it lands in the core, so every binding gets it.
 
-The rejected path pays full price for a structured error even when the caller
-only reads `str(e)`. Deferring the `Issue` objects until `.issues` is touched
-would leave the contract intact and stop charging for it up front.
+**Interned keys, in `seam-py`.** Each declared field name becomes one interned
+Python string at bind time, used both to look the key up in the payload and to
+write it into the result. It replaces two fresh string objects per field per
+call, and an interned string carries its hash already computed. Worth ~365 to
+~300-330 ns per field. Array elements did not move, which is right: they have no
+keys.
 
-Whether Seam ends up ahead of pydantic v2 has not been measured and will not be
-guessed at here. It is now within 1.8x on the rejected row and 4.5x on flat.
+Together the flat row went from roughly 2 800 to roughly 1 900 ns.
+
+### 4. Build validation issues lazily — next
+
+The rejected row is still *more expensive than the valid path*: nothing is built
+for the result, but `ValidationError`, a list, the `Issue` objects and their
+attributes are. Seam's error contract is richer than a message string and this
+is its price. Deferring the `Issue` objects until `.issues` is read would keep
+the contract and stop charging for it up front.
+
+### 5. Cheaper classification
+
+`classify` walks up to seven `is_instance_of` checks per value. Ordering them by
+what payloads actually contain, or checking the type object once, is untested
+ground.
 
 ## Caveats
 

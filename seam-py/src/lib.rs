@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use seam_core::input::{Input, Kind};
@@ -151,9 +152,10 @@ impl Schema {
         Ok(Validator {
             schema: Arc::clone(&self.inner),
             type_name: type_name.to_string(),
-            classes: Classes {
+            bindings: Bindings {
                 date: datetime.getattr("date")?.unbind(),
                 datetime: datetime.getattr("datetime")?.unbind(),
+                keys: Bindings::intern_keys(py, &self.inner),
             },
             limits: limits.map_or(seam_core::Limits::DEFAULT, |l| l.inner),
         })
@@ -186,7 +188,7 @@ pub struct Validator {
     type_name: String,
     // Resolved once. Immutable after binding, so sharing a validator across
     // threads carries no synchronisation of its own.
-    classes: Classes,
+    bindings: Bindings,
     limits: seam_core::Limits,
 }
 
@@ -223,7 +225,7 @@ impl Validator {
 
         // Read in place. Nothing is copied before the rules run, so a rejected
         // payload is never materialised at all.
-        let input = PyInput::new(payload.clone(), &self.classes);
+        let input = PyInput::new(payload.clone(), &self.bindings);
 
         if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
             let issues = e
@@ -238,7 +240,7 @@ impl Validator {
             return Err(raise(py, issues));
         }
 
-        Out { py, schema: &self.schema, classes: &self.classes }.object(object_type, payload)
+        Out { py, schema: &self.schema, bindings: &self.bindings }.object(object_type, payload)
     }
 }
 
@@ -368,10 +370,35 @@ fn raise(py: Python<'_>, issues: Vec<Issue>) -> PyErr {
     err
 }
 
-/// The `datetime` classes, resolved once when a validator is bound.
-struct Classes {
+/// Everything resolved once when a validator is bound.
+struct Bindings {
     date: Py<PyAny>,
     datetime: Py<PyAny>,
+    /// One interned Python string per field name in the schema.
+    ///
+    /// Without this a field costs two fresh Python strings per call: one to
+    /// look the key up in the payload and one to write it into the result.
+    /// Interned strings also carry a precomputed hash, so the dict lookup that
+    /// follows is cheaper too.
+    keys: HashMap<String, Py<PyString>>,
+}
+
+impl Bindings {
+    fn key<'py>(&self, py: Python<'py>, name: &str) -> Option<&Bound<'py, PyString>> {
+        self.keys.get(name).map(|k| k.bind(py))
+    }
+
+    /// Walks every declared field name once, at bind time.
+    fn intern_keys(py: Python<'_>, schema: &seam_core::Schema) -> HashMap<String, Py<PyString>> {
+        let mut keys = HashMap::new();
+        for ty in schema.types.values() {
+            for field in &ty.fields {
+                keys.entry(field.name.clone())
+                    .or_insert_with(|| PyString::intern(py, &field.name).unbind());
+            }
+        }
+        keys
+    }
 }
 
 /// A Python object the engine reads in place.
@@ -381,18 +408,18 @@ struct Classes {
 /// the object itself.
 struct PyInput<'a, 'py> {
     ob: Bound<'py, PyAny>,
-    classes: &'a Classes,
+    bindings: &'a Bindings,
     kind: Kind,
 }
 
 impl<'a, 'py> PyInput<'a, 'py> {
-    fn new(ob: Bound<'py, PyAny>, classes: &'a Classes) -> Self {
-        let kind = classify(&ob, classes);
-        PyInput { ob, classes, kind }
+    fn new(ob: Bound<'py, PyAny>, bindings: &'a Bindings) -> Self {
+        let kind = classify(&ob, bindings);
+        PyInput { ob, bindings, kind }
     }
 
     fn child(&self, ob: Bound<'py, PyAny>) -> PyInput<'a, 'py> {
-        PyInput::new(ob, self.classes)
+        PyInput::new(ob, self.bindings)
     }
 }
 
@@ -401,7 +428,7 @@ impl<'a, 'py> PyInput<'a, 'py> {
 /// `bool` is a subclass of `int` in Python and `datetime` is a subclass of
 /// `date`, so checking the general case first would silently turn every `True`
 /// into `1` and every timestamp into a calendar day.
-fn classify(ob: &Bound<'_, PyAny>, classes: &Classes) -> Kind {
+fn classify(ob: &Bound<'_, PyAny>, bindings: &Bindings) -> Kind {
     if ob.is_none() {
         return Kind::Null;
     }
@@ -433,8 +460,8 @@ fn classify(ob: &Bound<'_, PyAny>, classes: &Classes) -> Kind {
     let py = ob.py();
     // A date reaches the engine as its wire form, so the same rules apply to a
     // `datetime.date` as to the string a JSON payload would have carried.
-    if matches!(ob.is_instance(classes.datetime.bind(py)), Ok(true))
-        || matches!(ob.is_instance(classes.date.bind(py)), Ok(true))
+    if matches!(ob.is_instance(bindings.datetime.bind(py)), Ok(true))
+        || matches!(ob.is_instance(bindings.date.bind(py)), Ok(true))
     {
         return Kind::String;
     }
@@ -514,7 +541,13 @@ impl<'a, 'py> Input for PyInput<'a, 'py> {
         let Ok(dict) = self.ob.cast::<PyDict>() else {
             return Slot::Absent;
         };
-        match dict.get_item(key) {
+        // The interned key when the schema declared it, which is every call
+        // that matters; a fresh string only for a name the cache never saw.
+        let found = match self.bindings.key(self.ob.py(), key) {
+            Some(interned) => dict.get_item(interned),
+            None => dict.get_item(key),
+        };
+        match found {
             Ok(Some(v)) if v.is_none() => Slot::Null,
             Ok(Some(v)) => Slot::Present(self.child(v)),
             _ => Slot::Absent,
@@ -547,7 +580,7 @@ impl<'a, 'py> Input for PyInput<'a, 'py> {
 struct Out<'a, 'py> {
     py: Python<'py>,
     schema: &'a seam_core::Schema,
-    classes: &'a Classes,
+    bindings: &'a Bindings,
 }
 
 impl<'py> Out<'_, 'py> {
@@ -560,8 +593,17 @@ impl<'py> Out<'_, 'py> {
         for field in &ty.fields {
             // An absent key stays absent. `"bio" in result` is how a caller
             // reads absence, and writing None here would collapse it into null.
-            if let Ok(Some(v)) = dict.get_item(&field.name) {
-                out.set_item(&field.name, self.value(&field.ty, &v)?)?;
+            match self.bindings.key(self.py, &field.name) {
+                Some(key) => {
+                    if let Ok(Some(v)) = dict.get_item(key) {
+                        out.set_item(key, self.value(&field.ty, &v)?)?;
+                    }
+                }
+                None => {
+                    if let Ok(Some(v)) = dict.get_item(&field.name) {
+                        out.set_item(&field.name, self.value(&field.ty, &v)?)?;
+                    }
+                }
             }
         }
 
@@ -601,11 +643,11 @@ impl<'py> Out<'_, 'py> {
     }
 
     fn date(&self, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        let date_cls = self.classes.date.bind(self.py);
+        let date_cls = self.bindings.date.bind(self.py);
         // Already a `date` and not a `datetime`: nothing to build.
         if matches!(ob.is_instance(date_cls), Ok(true))
             && !matches!(
-                ob.is_instance(self.classes.datetime.bind(self.py)),
+                ob.is_instance(self.bindings.datetime.bind(self.py)),
                 Ok(true)
             )
         {
@@ -616,7 +658,7 @@ impl<'py> Out<'_, 'py> {
     }
 
     fn datetime(&self, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        let datetime_cls = self.classes.datetime.bind(self.py);
+        let datetime_cls = self.bindings.datetime.bind(self.py);
         if matches!(ob.is_instance(datetime_cls), Ok(true)) {
             return Ok(ob.clone());
         }

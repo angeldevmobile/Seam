@@ -162,13 +162,14 @@ real deliverable, and it is what survives even if someone reimplements the engin
 Seam compiles a schema once into a validator tree and reuses it across every call, so parsing
 and rule resolution happen at load time rather than per payload. That part works.
 
-**The rest does not, and the benchmarks say so.** Validating a payload currently copies it into
-an intermediate representation before checking anything, and that copy costs roughly **10x
-msgspec and 2x pydantic v2**, rising to 18x on array-heavy payloads. Full methodology, hardware,
-library versions and a script that reproduces it are in [`benchmarks/`](benchmarks/).
+**The rest is being worked on in the open, and the benchmarks say where it stands.** Seam
+validates the host's objects in place, with no intermediate copy, and resolves everything that
+does not depend on the payload when a validator is bound. It currently costs about **5.6x
+msgspec** and **1.1 to 1.3x pydantic v2** on a flat payload, rising to 12x and 3.5x on
+array-heavy ones. It is slower than both in every scenario measured.
 
-Removing that copy is the next piece of work. Until it lands, treat speed as a design goal that
-has not been delivered, and read the numbers rather than this paragraph.
+Full methodology, hardware, library versions, the remaining plan and scripts that reproduce all
+of it are in [`benchmarks/`](benchmarks/). Read the numbers rather than this paragraph.
 
 The 5-50x figure often quoted from `pydantic-core` was measured against pure-Python Pydantic v1
 and does not transfer to a different engine with a different FFI shape. Every number Seam

@@ -34,21 +34,53 @@ pub fn validate<I: Input>(
     }
 }
 
+/// A step of the path, borrowed from the schema.
+///
+/// The old shape owned its keys, which meant cloning a field name into a
+/// `String` for every field of every payload just so a path would be ready if
+/// something went wrong. On a valid payload nothing ever read them. Borrowing
+/// costs nothing on the happy path and materialises only when an issue is
+/// actually recorded.
+enum Step<'a> {
+    Key(&'a str),
+    Index(usize),
+}
+
 struct Validator<'a> {
     schema: &'a Schema,
     limits: Limits,
-    path: Vec<Segment>,
+    path: Vec<Step<'a>>,
     issues: Vec<Issue>,
 }
 
-impl Validator<'_> {
-    fn push(&mut self, code: Code, message: String) {
-        self.issues
-            .push(Issue { path: Path(self.path.clone()), code, message });
+impl<'a> Validator<'a> {
+    fn here(&self) -> Path {
+        Path(
+            self.path
+                .iter()
+                .map(|step| match step {
+                    Step::Key(k) => Segment::Key((*k).to_string()),
+                    Step::Index(i) => Segment::Index(*i),
+                })
+                .collect(),
+        )
     }
 
-    fn within<F: FnOnce(&mut Self)>(&mut self, seg: Segment, f: F) {
-        self.path.push(seg);
+    fn push(&mut self, code: Code, message: String) {
+        let path = self.here();
+        self.issues.push(Issue { path, code, message });
+    }
+
+    /// Records an issue one step below the current path, for a key that came
+    /// from the payload rather than the schema and so cannot be borrowed.
+    fn push_under(&mut self, key: String, code: Code, message: String) {
+        let mut path = self.here();
+        path.0.push(Segment::Key(key));
+        self.issues.push(Issue { path, code, message });
+    }
+
+    fn within<F: FnOnce(&mut Self)>(&mut self, step: Step<'a>, f: F) {
+        self.path.push(step);
         f(self);
         self.path.pop();
     }
@@ -71,7 +103,7 @@ impl Validator<'_> {
         );
     }
 
-    fn object<I: Input>(&mut self, ty: &ObjectType, input: &I, depth: usize) {
+    fn object<I: Input>(&mut self, ty: &'a ObjectType, input: &I, depth: usize) {
         if !self.depth_ok(depth) {
             return;
         }
@@ -108,16 +140,14 @@ impl Validator<'_> {
             let owner = ty.name.clone();
             for key in unknown {
                 let message = format!("`{owner}` declares no field named `{key}`");
-                self.within(Segment::Key(key), |v| {
-                    v.push(Code::UnknownField, message);
-                });
+                self.push_under(key, Code::UnknownField, message);
             }
         }
     }
 
-    fn field<I: Input>(&mut self, field: &Field, input: &I, depth: usize) {
+    fn field<I: Input>(&mut self, field: &'a Field, input: &I, depth: usize) {
         let slot = input.slot(&field.name);
-        self.within(Segment::Key(field.name.clone()), |v| match slot {
+        self.within(Step::Key(&field.name), |v| match slot {
             Slot::Absent => {
                 if !field.presence.optional {
                     v.push(Code::Required, required_message(field.presence));
@@ -135,7 +165,7 @@ impl Validator<'_> {
         });
     }
 
-    fn value<I: Input>(&mut self, ty: &Type, input: &I, depth: usize) {
+    fn value<I: Input>(&mut self, ty: &'a Type, input: &I, depth: usize) {
         // Applies to every string-shaped type, so it is checked once here
         // rather than in each of String, Date, DateTime and Enum.
         if input.kind() == Kind::String {
@@ -182,13 +212,18 @@ impl Validator<'_> {
             Type::Enum(allowed) => self.enumeration(allowed, input),
             Type::Array { item, item_nullable } => self.array(item, *item_nullable, input, depth),
             Type::Object(obj) => self.object(obj, input, depth),
-            Type::Ref(name) => match self.schema.get(name) {
-                Some(obj) => self.object(obj, input, depth),
-                None => self.push(
-                    Code::UnknownType,
-                    format!("schema declares no type named `{name}`"),
-                ),
-            },
+            Type::Ref(name) => {
+                // Bound first so the borrow of the schema is not tied to the
+                // mutable borrow of `self` that follows.
+                let target = self.schema.get(name);
+                match target {
+                    Some(obj) => self.object(obj, input, depth),
+                    None => self.push(
+                        Code::UnknownType,
+                        format!("schema declares no type named `{name}`"),
+                    ),
+                }
+            }
         }
     }
 
@@ -248,7 +283,7 @@ impl Validator<'_> {
         }
     }
 
-    fn array<I: Input>(&mut self, item: &Type, item_nullable: bool, input: &I, depth: usize) {
+    fn array<I: Input>(&mut self, item: &'a Type, item_nullable: bool, input: &I, depth: usize) {
         if !self.depth_ok(depth) {
             return;
         }
@@ -266,7 +301,7 @@ impl Validator<'_> {
         }
         for i in 0..len {
             let Some(child) = input.item(i) else { continue };
-            self.within(Segment::Index(i), |v| match child.kind() {
+            self.within(Step::Index(i), |v| match child.kind() {
                 Kind::Null if item_nullable => {}
                 Kind::Null => v.push(
                     Code::NullNotAllowed,

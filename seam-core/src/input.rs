@@ -57,7 +57,6 @@ impl Kind {
 /// cannot read its own object has a bug, not a validation failure.
 pub trait Input {
     /// An element of an array, or the value at a key.
-    ///
     /// Implementations should make this converge, usually to themselves or to a
     /// reference to themselves. A type whose child is a strictly new type on
     /// every level would make the validator recurse forever at compile time.
@@ -71,13 +70,8 @@ pub trait Input {
 
     fn as_int(&self) -> Option<Int>;
 
-    /// An integer is an acceptable float; the reverse is not, so this returns
-    /// `Some` for both kinds while `as_int` returns `None` for a float.
     fn as_f64(&self) -> Option<f64>;
 
-    /// `Cow` because a host may hold text in a form that needs decoding, and
-    /// forcing `&str` would make those implementations allocate on every call
-    /// whether the validator looks at the contents or not.
     fn as_str(&self) -> Option<Cow<'_, str>>;
 
     /// Elements for an array, keys for an object, zero otherwise.
@@ -93,10 +87,6 @@ pub trait Input {
     fn slot(&self, key: &str) -> Slot<Self::Child<'_>>;
 
     /// Visits every key of an object, for the unknown-field check.
-    ///
-    /// A callback rather than an iterator: returning one from a trait with a
-    /// generic associated type buys lifetime trouble for no benefit, since the
-    /// only caller walks the keys once and keeps nothing.
     fn each_key(&self, f: &mut dyn FnMut(&str));
 }
 
