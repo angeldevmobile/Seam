@@ -17,6 +17,8 @@ typegen`, which emits TypedDicts. The generated file holds no rules, so the
 schema stays the only source of truth.
 """
 
+from __future__ import annotations
+
 from ._seam import (
     Issue,
     Issues,

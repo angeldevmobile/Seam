@@ -7,7 +7,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "napi": {
     "binaryName": "seam",
@@ -20,7 +20,7 @@
   "scripts": {
     "build": "napi build --platform --release --js native.js --dts native.d.ts",
     "build:debug": "napi build --platform --js native.js --dts native.d.ts",
-    "test": "node --test \"__test__/*.test.mjs\""
+    "test": "node --test __test__/binding.test.mjs __test__/conformance.test.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0"

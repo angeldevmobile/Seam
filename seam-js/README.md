@@ -85,7 +85,11 @@ schema.validator('User', { maxItems: 100, maxStringBytes: 4096 })
 
 ## Status
 
-Early development, not yet on npm. Build from a checkout:
+Early development, not yet on npm. **Node 20 or newer**: the compiled module
+targets Node-API 6 and would run on 18, but the build tool needs 20, and a
+version nothing tests is not a version this claims to support.
+
+Build from a checkout:
 
 ```bash
 cd seam-js && npm install && npm run build && npm test
