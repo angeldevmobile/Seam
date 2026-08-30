@@ -52,8 +52,8 @@ someone asks how fast Seam is.
 Seam is *faster from bytes than from a dict*, the same shape pydantic has,
 because parsing straight into the result skips building a dict nobody asked for.
 
-**The flat row is at parity with pydantic**: two runs gave 1 721 and 1 877 ns
-against 1 670 and 1 685. Nested is about 1.2x and the array row about 1.8x.
+Nested is about 1.2x pydantic and the array row about 1.8x. The flat row moved
+enough between runs to deserve its own paragraph, below the environment note.
 
 Before Seam owned the parse this table read 4 668, 7 069 and 15 685 ns, which
 was 2.8-3.0x pydantic.
@@ -62,10 +62,14 @@ Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
 2.13.5. Nine repeats per cell, each at least 50 ms, median reported.
 
-Across three runs the flat row came out at 1 919, 2 339 and 1 902 ns against
-pydantic's 1 662, 1 778 and 1 756, so **Seam is somewhere between 1.1x and 1.3x
-pydantic's cost on a flat payload**, not at parity with it. Every row is still
-slower than both competitors.
+Across five runs the flat row came out at 1 721, 1 877, 1 902, 1 919 and 2 339 ns
+against pydantic's 1 670, 1 685, 1 756, 1 662 and 1 778. Paired, that is 1.03x,
+1.11x, 1.08x, 1.16x and 1.32x, so **Seam costs between 1.03x and 1.32x pydantic
+on a flat payload, with a median of 1.11x** — close, and on the best run within
+noise of it, but not parity. Every row is still slower than both competitors.
+
+The spread is the point of the section below: a single run of this row is not
+evidence, in either direction.
 
 ## Why cross-run comparison is not allowed here
 

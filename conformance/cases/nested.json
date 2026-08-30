@@ -1,0 +1,137 @@
+{
+  "schema": "order",
+  "type": "Order",
+  "base": {
+    "id": 1,
+    "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }],
+    "total": { "amount": 19.98, "currency": "USD" },
+    "coupon": null,
+    "placed": "2026-08-30T12:00:00Z"
+  },
+  "cases": [
+    {
+      "name": "a nested order validates",
+      "expect": "valid"
+    },
+    {
+      "name": "an issue inside an array element carries the element's own path",
+      "note": "lines[1].qty, not lines. A binding that walks nesting with its own loop loses this.",
+      "input": {
+        "lines": [
+          { "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } },
+          { "sku": "B2", "qty": 0, "unit": { "amount": 1.0, "currency": "EUR" } }
+        ]
+      },
+      "expect": { "issues": [{ "path": "lines[1].qty", "code": "out_of_range" }] }
+    },
+    {
+      "name": "an issue two levels down carries the full path",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "GBP" } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].unit.currency", "code": "not_in_enum" }] }
+    },
+    {
+      "name": "a non-finite float is rejected",
+      "note": "input_raw is required here: JSON.stringify(1e400) is `null`, so a runner that re-serialises would test null_not_allowed instead.",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 1e400, "currency": "USD" } }]
+      },
+      "input_raw": "{\"id\": 1, \"lines\": [{\"sku\": \"A1\", \"qty\": 2, \"unit\": {\"amount\": 1e400, \"currency\": \"USD\"}}], \"total\": {\"amount\": 19.98, \"currency\": \"USD\"}, \"coupon\": null, \"placed\": \"2026-08-30T12:00:00Z\"}",
+      "expect": { "issues": [{ "path": "lines[0].unit.amount", "code": "not_finite" }] }
+    },
+    {
+      "name": "a string past @max_len is too long",
+      "input": {
+        "lines": [{ "sku": "ABCDEFGHI", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].sku", "code": "too_long" }] }
+    },
+    {
+      "name": "an empty array is too few items",
+      "input": { "lines": [] },
+      "expect": { "issues": [{ "path": "lines", "code": "too_few_items" }] }
+    },
+    {
+      "name": "a string below @min_len is too short",
+      "input": {
+        "lines": [{ "sku": "", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].sku", "code": "too_short" }] }
+    },
+    {
+      "name": "a rule on a nullable field still applies to a present value",
+      "input": { "coupon": "TOOLONGCOUPON" },
+      "expect": { "issues": [{ "path": "coupon", "code": "too_long" }] }
+    },
+    {
+      "name": "a nullable field accepts null without checking its rules",
+      "input": { "coupon": null },
+      "expect": "valid"
+    },
+    {
+      "name": "a required field missing inside an array element",
+      "input": {
+        "lines": [{ "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].sku", "code": "required" }] }
+    },
+    {
+      "name": "a nested object sent as null where null is not allowed",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": null }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].unit", "code": "null_not_allowed" }] }
+    },
+    {
+      "name": "an unknown key inside a nested object",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD", "vat": 0.18 } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].unit.vat", "code": "unknown_field" }] }
+    },
+    {
+      "name": "an optional nullable field may be absent",
+      "input": { "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }] },
+      "expect": "valid"
+    },
+    {
+      "name": "an optional nullable field may be null",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" }, "note": null }]
+      },
+      "expect": "valid"
+    },
+    {
+      "name": "an integer where a float is declared is accepted",
+      "note": "The reverse is not. See the mapping spec, section 3.",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 10, "currency": "USD" } }]
+      },
+      "expect": "valid"
+    },
+    {
+      "name": "a float where an integer is declared is a type mismatch",
+      "input": {
+        "lines": [{ "sku": "A1", "qty": 2.5, "unit": { "amount": 9.99, "currency": "USD" } }]
+      },
+      "expect": { "issues": [{ "path": "lines[0].qty", "code": "type_mismatch" }] }
+    },
+    {
+      "name": "every issue is reported in one pass, in declaration order, depth first",
+      "note": "Not just the first. Order is stable API: fields in declaration order, then unknown keys sorted.",
+      "input": {
+        "lines": [{ "sku": "", "qty": 0, "unit": { "amount": 9.99, "currency": "GBP" } }],
+        "coupon": "TOOLONGCOUPON"
+      },
+      "expect": {
+        "issues": [
+          { "path": "lines[0].sku", "code": "too_short" },
+          { "path": "lines[0].qty", "code": "out_of_range" },
+          { "path": "lines[0].unit.currency", "code": "not_in_enum" },
+          { "path": "coupon", "code": "too_long" }
+        ]
+      }
+    }
+  ]
+}

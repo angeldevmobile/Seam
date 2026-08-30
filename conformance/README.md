@@ -82,4 +82,26 @@ The runner has a self-test (`the_harness_detects_a_wrong_expectation`) that
 feeds it a deliberately wrong expectation. A harness that cannot fail proves
 nothing.
 
-Remaining: a runner in each binding, sharing these files.
+## What this suite does not cover
+
+50 cases over two schemas, asserting 15 of the 19 codes in the mapping spec.
+The four it does not reach, and why, because an uncovered code should be a
+known gap rather than an oversight:
+
+- **`unsafe_integer`** cannot be produced from bytes. It means *the host's own
+  value is already the wrong number*, which is a condition of a JavaScript
+  `number` past 2^53 and of nothing the suite can write as JSON text. It is
+  tested in `seam-js/__test__/binding.test.mjs`, where it belongs.
+- **`depth_exceeded`** and **`size_exceeded`** need limits below the defaults,
+  and a case file cannot yet set them. Adding a `limits` key to the document
+  and honouring it in all three runners would close both.
+- **`unknown_type`** is unreachable by construction: the `.seam` parser rejects
+  a dangling reference at parse time, and every binding rejects an undeclared
+  type name when the validator is bound, before validation begins.
+
+## Runners
+
+Three runners share these files today: `seam-core/tests/conformance.rs`,
+`seam-py/tests/test_conformance.py` and `seam-js/__test__/conformance.test.mjs`.
+All three run in CI on Linux, macOS and Windows. Agreement between them is what
+"no drift" means, and it is checked on every push rather than asserted here.

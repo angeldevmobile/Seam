@@ -1,0 +1,27 @@
+// A second schema, for what `user.seam` cannot reach: floats, nesting through
+// a reference held inside an array, and a lower bound on a collection.
+//
+// The paths matter as much as the codes here. An issue inside the second line
+// item is `lines[1].unit.amount`, not `lines`, and that is what a binding gets
+// wrong when it walks a nested structure with its own loop.
+
+schema Money {
+  amount:   f64
+  currency: enum { USD, EUR, PEN }
+}
+
+schema Line {
+  sku:      String            @min_len(1) @max_len(8)
+  qty:      u32               @range(1..=999)
+  unit:     Money
+  note:     optional String?
+}
+
+schema Order {
+  id:       u64
+  lines:    [Line]            @min_items(1) @max_items(50)
+  total:    Money
+  coupon:   String?           @max_len(8)
+  placed:   DateTime
+  ship_by:  optional Date
+}

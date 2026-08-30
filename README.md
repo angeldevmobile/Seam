@@ -3,8 +3,9 @@
 **One schema. Every language. No drift.**
 
 Seam is a cross-language data contract: you write the schema once in a `.seam` file, and
-Python, Node, the browser, and later the JVM, all validate against the *same compiled engine*,
-with the same rules, the same errors, and the same answers on the cases that usually break.
+Python and Node — with the browser and the JVM to come — all validate against the *same compiled
+engine*, with the same rules, the same errors, and the same answers on the cases that usually
+break.
 
 There is no generated mirror type to keep in sync. There is no second validator to drift.
 
@@ -168,15 +169,31 @@ commits to is the part everyone else leaves undocumented:
 
 ```json
 {
-  "case": "u64 above MAX_SAFE_INTEGER survives the boundary",
-  "schema": "user.seam",
-  "input": { "id": 9007199254740993 },
-  "expect": { "valid": true, "normalized": { "id": "9007199254740993" } }
+  "schema": "user",
+  "type": "User",
+  "cases": [
+    {
+      "name": "u64 at the JS MAX_SAFE_INTEGER boundary is exact",
+      "note": "JSON.parse corrupts this to ...992. A conformant runner must not.",
+      "input": { "id": 9007199254740993, "name": "Gabriel", "plan": "pro", "nickname": null },
+      "input_raw": "{\"id\": 9007199254740993, \"name\": \"Gabriel\", \"plan\": \"pro\", \"nickname\": null}",
+      "expect": "valid"
+    }
+  ]
 }
 ```
 
+`expect` is `"valid"` or an object listing `issues`, each asserting `path` and `code` and never
+`message`. `input_raw` carries the same payload as JSON *text*, because a runner in JavaScript
+would otherwise corrupt that integer with `JSON.parse` while merely loading the case file.
+
 "No drift" stops being a slogan the moment it becomes a test that can fail. That suite is the
 real deliverable, and it is what survives even if someone reimplements the engine.
+
+Today it is 50 cases over two schemas, asserting 15 of the spec's 19 error codes, run by three
+runners on three operating systems. [`conformance/README.md`](conformance/README.md) lists the
+four codes it does not reach and why, because an uncovered code should be a known gap rather
+than an oversight.
 
 ## Fast, and here is what that means
 
@@ -188,10 +205,11 @@ Measured from raw JSON bytes, which is what a service actually holds when a requ
 | nested + a date | 3 039 ns | **643** | 2 484 |
 | array of 100 strings | 9 961 ns | **3 684** | 5 266 |
 
-**A flat payload is at parity with pydantic v2**, and about 3.9x msgspec. msgspec is faster in
-every scenario measured, and will stay that way: its fields are slots in a layout fixed at
-compile time, while a Seam schema is a file read at runtime. That is the price of the schema
-being portable, and it is the whole point rather than a defect.
+That is one run. Across five, **a flat payload costs between 1.03x and 1.32x pydantic v2, median
+1.11x** — close, and on the best run within noise of it, but not parity. Every row is slower than
+both competitors, and msgspec will stay ahead in every scenario: its fields are slots in a layout
+fixed at compile time, while a Seam schema is a file read at runtime. That is the price of the
+schema being portable, and it is the whole point rather than a defect.
 
 Four things earn those numbers, and each was measured on its own before it was kept:
 
@@ -289,9 +307,8 @@ seam/
 │   └── validate.rs       #   one walk, generic over the input
 ├── seam-py/              # PyO3 binding, abi3 wheels for 3.9+
 ├── seam-js/              # napi-rs binding, bigint for 64-bit integers
-├── seam-js/              # napi-rs binding      (phase 2)
-├── seam-wasm/            # wasm-bindgen binding (phase 3)
-└── seam-jvm/             # Panama binding       (phase 5)
+├── seam-wasm/            # wasm-bindgen binding (phase 3, not built yet)
+└── seam-jvm/             # Panama binding       (phase 5, not built yet)
 ```
 
 ```
@@ -353,7 +370,7 @@ Early development, and not yet published to crates.io or PyPI. Phase 1 is done.
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a
 `number` would lie, and generated TypeScript interfaces. Both take a dict or object, or raw JSON, in one call, normalise values on
 the way out, and build nothing for an error until something reads it. The conformance suite runs
-from Rust, Python and Node against the same case files, in CI, on three operating systems.
+from Rust, Python and Node against the same 50 cases, in CI, on three operating systems.
 
 **What is honest about it.** Unions, custom validators and framework integration do not exist. If you work in a single language today, pydantic or msgspec is the
 better tool and this README says so plainly further up. The reason to reach for Seam is the
