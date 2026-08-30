@@ -39,24 +39,24 @@ someone asks how fast Seam is.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 1 924 | **421** | 1 589 |
-| nested + date | 3 660 | **657** | 2 559 |
-| array of 100 strings | 13 748 | **3 685** | 5 566 |
+| flat, 6 fields | 1 721 | **447** | 1 670 |
+| nested + date | 3 039 | **643** | 2 484 |
+| array of 100 strings | 9 961 | **3 684** | 5 266 |
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 4.6x | 1.00x | 3.8x |
-| nested + date | 5.6x | 1.00x | 3.9x |
-| array of 100 strings | 3.7x | 1.00x | 1.5x |
+| flat, 6 fields | 3.9x | 1.00x | 3.7x |
+| nested + date | 4.7x | 1.00x | 3.9x |
+| array of 100 strings | 2.7x | 1.00x | 1.4x |
 
-Seam is now *faster from bytes than from a dict*, the same shape pydantic has,
+Seam is *faster from bytes than from a dict*, the same shape pydantic has,
 because parsing straight into the result skips building a dict nobody asked for.
 
-Before Seam owned the parse, this table read 4 668, 7 069 and 15 685 ns, or
-2.8-3.0x pydantic. The flat row is now within 1.2x of it.
+**The flat row is at parity with pydantic**: two runs gave 1 721 and 1 877 ns
+against 1 670 and 1 685. Nested is about 1.2x and the array row about 1.8x.
 
-The array row barely moved and is the one left: its cost is emitting a hundred
-Python strings, which no parser change reaches.
+Before Seam owned the parse this table read 4 668, 7 069 and 15 685 ns, which
+was 2.8-3.0x pydantic.
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
@@ -248,6 +248,31 @@ crate would rebuild the intermediate tree the `Input` trait exists to avoid.
 
 It parses in order to validate. There is no encoder, which is what keeps the
 main README's "no general-purpose serialization" line true.
+
+## The parser, in two stages
+
+**Stage 1 built a tree.** `Document::parse` produced an owned `Value`: a
+`String` per string, a `Vec` per array. Correct, and enough to fix the
+correctness problem, but it allocated once per value.
+
+**Stage 2 records where things are.** Parsing now writes a flat index of spans
+into the caller's buffer, and `Ref` implements `Input` over it. A string is
+borrowed rather than copied, and a rejected document is never materialised at
+all. Measured on the same metric, per array element:
+
+| | stage 1 | stage 2 |
+|---|---:|---:|
+| array of 100, from bytes | 13 748 ns | **9 961 ns** |
+
+An owned `String` is still produced for a string that carried escapes, which is
+the only case that needs one.
+
+### One thing that was tried and removed
+
+Sizing the output list up front — collecting into a `Vec` and handing it to
+`PyList::new` instead of appending one element at a time — made no difference
+that could be told from run-to-run noise. It costs an allocation, so it was
+taken back out. An unmeasurable change is not an improvement.
 
 ## Caveats
 

@@ -15,8 +15,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use seam_core::input::{Input, Kind};
+use seam_core::json::Ref as JsonRef;
 use seam_core::schema::{ObjectType, Rule, Type};
-use seam_core::value::{Int, Slot, Value};
+use seam_core::value::{Int, Slot};
 use seam_core::Code;
 
 create_exception!(_seam, ParseError, PyException);
@@ -331,10 +332,13 @@ impl Validator {
     }
 
     fn run_json<'py>(&self, py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyAny>> {
-        let value = seam_core::json::parse(bytes, self.limits)
+        // The document records where each value sits; nothing is copied out of
+        // the buffer, so a rejected payload is never materialised at all.
+        let doc = seam_core::json::Document::parse(bytes, self.limits)
             .map_err(|e| ParseError::new_err(e.to_string()))?;
+        let root = doc.root();
 
-        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &value, self.limits) {
+        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &root, self.limits) {
             return Err(raise(py, e.issues));
         }
 
@@ -350,7 +354,7 @@ impl Validator {
         };
 
         Out { py, schema: &self.schema, bindings: &self.bindings }
-            .object_from_value(object_type, &value)
+            .object_from_json(object_type, &root)
     }
 }
 
@@ -799,86 +803,110 @@ impl<'py> Out<'_, 'py> {
 }
 
 impl<'py> Out<'_, 'py> {
-    fn object_from_value(&self, ty: &ObjectType, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+    fn object_from_json(
+        &self,
+        ty: &ObjectType,
+        r: &JsonRef<'_, '_>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let out = PyDict::new(self.py);
-        let Value::Object(map) = v else {
-            return Ok(out.into_any());
-        };
         for field in &ty.fields {
             // Absent stays absent, the same as on the dict path.
-            if let Some(found) = map.get(&field.name) {
-                let value = self.emit(&field.ty, found)?;
-                match self.bindings.key(self.py, &field.name) {
-                    Some(key) => out.set_item(key, value)?,
-                    None => out.set_item(&field.name, value)?,
-                }
+            let found = match r.slot(&field.name) {
+                Slot::Absent => continue,
+                Slot::Null => None,
+                Slot::Present(v) => Some(v),
+            };
+            let value = match found {
+                None => self.py.None().into_bound(self.py),
+                Some(v) => self.emit_json(&field.ty, &v)?,
+            };
+            match self.bindings.key(self.py, &field.name) {
+                Some(key) => out.set_item(key, value)?,
+                None => out.set_item(&field.name, value)?,
             }
         }
         if !ty.deny_unknown_fields {
-            for (k, extra) in map {
-                if ty.field(k).is_none() {
-                    out.set_item(k, self.plain(extra)?)?;
+            for (key, v) in r.entries() {
+                if ty.field(&key).is_none() {
+                    out.set_item(&*key, self.plain_json(&v)?)?;
                 }
             }
         }
         Ok(out.into_any())
     }
 
-    fn emit(&self, ty: &Type, v: &Value) -> PyResult<Bound<'py, PyAny>> {
-        if matches!(v, Value::Null) {
-            return Ok(self.py.None().into_bound(self.py));
-        }
-        match (ty, v) {
-            (Type::Date, Value::String(s)) => self
+    fn emit_json(&self, ty: &Type, r: &JsonRef<'_, '_>) -> PyResult<Bound<'py, PyAny>> {
+        match (ty, r.kind()) {
+            (Type::Date, Kind::String) => self
                 .bindings
                 .date
                 .bind(self.py)
-                .call_method1("fromisoformat", (s,)),
-            (Type::DateTime, Value::String(s)) => self
-                .bindings
-                .datetime
-                .bind(self.py)
-                .call_method1("fromisoformat", (python_iso(s),)),
-            (Type::Array { item, .. }, Value::Array(items)) => {
+                .call_method1("fromisoformat", (r.as_str().unwrap_or_default().as_ref(),)),
+            (Type::DateTime, Kind::String) => {
+                let text = r.as_str().unwrap_or_default();
+                self.bindings
+                    .datetime
+                    .bind(self.py)
+                    .call_method1("fromisoformat", (python_iso(&text),))
+            }
+            (Type::Array { item, .. }, Kind::Array) => {
+                // Appended one at a time. Collecting into a Vec first to size
+                // the list up front was tried and made no measurable
+                // difference, so it is not worth the extra allocation.
                 let list = PyList::empty(self.py);
-                for each in items {
-                    list.append(self.emit(item, each)?)?;
+                for each in r.elements() {
+                    list.append(self.emit_json(item, &each)?)?;
                 }
                 Ok(list.into_any())
             }
-            (Type::Object(obj), _) => self.object_from_value(obj, v),
+            (Type::Object(obj), _) => self.object_from_json(obj, r),
             (Type::Ref(name), _) => match self.schema.get(name) {
-                Some(obj) => self.object_from_value(obj, v),
-                None => self.plain(v),
+                Some(obj) => self.object_from_json(obj, r),
+                None => self.plain_json(r),
             },
-            _ => self.plain(v),
+            _ => self.plain_json(r),
         }
     }
 
-    fn plain(&self, v: &Value) -> PyResult<Bound<'py, PyAny>> {
-        Ok(match v {
-            Value::Null => self.py.None().into_bound(self.py),
-            Value::Bool(b) => b.into_pyobject(self.py)?.to_owned().into_any(),
-            Value::Int(Int::Signed(n)) => n.into_pyobject(self.py)?.into_any(),
-            Value::Int(Int::Unsigned(n)) => n.into_pyobject(self.py)?.into_any(),
-            Value::Float(f) => f.into_pyobject(self.py)?.into_any(),
-            Value::String(s) => s.into_pyobject(self.py)?.into_any(),
-            Value::Array(items) => {
+    fn plain_json(&self, r: &JsonRef<'_, '_>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(match r.kind() {
+            Kind::Null | Kind::IntegerTooWide | Kind::Foreign => self.py.None().into_bound(self.py),
+            Kind::Bool => r
+                .as_bool()
+                .unwrap_or_default()
+                .into_pyobject(self.py)?
+                .to_owned()
+                .into_any(),
+            Kind::Int => match r.as_int() {
+                Some(Int::Signed(n)) => n.into_pyobject(self.py)?.into_any(),
+                Some(Int::Unsigned(n)) => n.into_pyobject(self.py)?.into_any(),
+                None => self.py.None().into_bound(self.py),
+            },
+            Kind::Float => r
+                .as_f64()
+                .unwrap_or_default()
+                .into_pyobject(self.py)?
+                .into_any(),
+            Kind::String => r
+                .as_str()
+                .unwrap_or_default()
+                .as_ref()
+                .into_pyobject(self.py)?
+                .into_any(),
+            Kind::Array => {
                 let list = PyList::empty(self.py);
-                for each in items {
-                    list.append(self.plain(each)?)?;
+                for each in r.elements() {
+                    list.append(self.plain_json(&each)?)?;
                 }
                 list.into_any()
             }
-            Value::Object(map) => {
+            Kind::Object => {
                 let d = PyDict::new(self.py);
-                for (k, each) in map {
-                    d.set_item(k, self.plain(each)?)?;
+                for (key, v) in r.entries() {
+                    d.set_item(&*key, self.plain_json(&v)?)?;
                 }
                 d.into_any()
             }
-            // Validation rejects this before the result is built.
-            Value::IntTooWide => self.py.None().into_bound(self.py),
         })
     }
 }
