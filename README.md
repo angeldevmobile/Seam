@@ -3,7 +3,7 @@
 **One schema. Every language. No drift.**
 
 Seam is a cross-language data contract: you write the schema once in a `.seam` file, and
-Python, Node, the browser — and later the JVM — validate against the *same compiled engine*,
+Python, Node, the browser, and later the JVM, all validate against the *same compiled engine*,
 with the same rules, the same errors, and the same answers on the cases that usually break.
 
 There is no generated mirror type to keep in sync. There is no second validator to drift.
@@ -12,8 +12,8 @@ There is no generated mirror type to keep in sync. There is no second validator 
 
 ## The problem is not validation. It's the boundary.
 
-Every language already has a good validator. Pydantic, Zod, Valibot, Jakarta Bean Validation —
-they all work well *inside* their own language.
+Every language already has a good validator. Pydantic, Zod, Valibot and Jakarta Bean Validation
+all work well *inside* their own language.
 
 The bugs don't happen inside a language. They happen at the seam between two of them, because
 each language quietly disagrees about what your data means. Here is one payload:
@@ -26,9 +26,9 @@ Three runtimes, three different readings, zero errors raised:
 
 | | `id` | `nickname` | `signup_date` |
 |---|---|---|---|
-| **Python** | `9007199254740993` — exact | `None` — indistinguishable from a missing key | a `str`, unless something parsed it |
-| **JavaScript** | `9007199254740992` — **silently wrong** | `null`, but re-serializing after setting it to `undefined` **deletes the key** | `new Date(...)` → UTC midnight; in UTC−5 `.getDate()` returns **28** |
-| **Java** | `9007199254740993L` — exact | `null` — indistinguishable from a missing key | `[2026,8,29]` under Jackson's defaults, unless JSR-310 is registered |
+| **Python** | `9007199254740993`, exact | `None`, indistinguishable from a missing key | a `str`, unless something parsed it |
+| **JavaScript** | `9007199254740992`, **silently wrong** | `null`, but re-serializing after setting it to `undefined` **deletes the key** | `new Date(...)` → UTC midnight; in UTC-5 `.getDate()` returns **28** |
+| **Java** | `9007199254740993L`, exact | `null`, indistinguishable from a missing key | `[2026,8,29]` under Jackson's defaults, unless JSR-310 is registered |
 
 Nobody threw. Nobody logged. The ID is corrupted on one side, the date is off by a day on
 another, and "user cleared their nickname" is indistinguishable from "client didn't send the
@@ -39,30 +39,30 @@ why it surfaces three weeks later in production instead of in CI.
 
 - **JavaScript / TypeScript.** Numbers are IEEE-754 doubles: any integer above
   `Number.MAX_SAFE_INTEGER` (2^53 - 1) loses precision during `JSON.parse`, silently. There are
-  three states for a missing value — `undefined`, `null`, and absent — and `JSON.stringify`
+  three states for a missing value (`undefined`, `null`, and absent), and `JSON.stringify`
   drops `undefined` keys entirely, so a round-trip is not the identity function. `Date` is a
   timestamp with no timezone and no date-only variant, and its parsing rules are inconsistent
   by specification: `new Date("2026-08-29")` is UTC, `new Date("2026-08-29T00:00:00")` is local.
   TypeScript's types are erased at runtime, so `as User` validates nothing at all.
 
-- **Python.** `None` is the only empty value, so *absent* and *null* collapse into one thing —
-  telling them apart requires sentinel objects. `datetime` is a subclass of `date`, so
+- **Python.** `None` is the only empty value, so *absent* and *null* collapse into one thing,
+  and telling them apart requires sentinel objects. `datetime` is a subclass of `date`, so
   `isinstance(dt, date)` is `True` for a datetime and a whole class of checks pass when they
   shouldn't. Naive and aware datetimes are both `datetime`, they cannot be compared without a
   `TypeError`, and serializing a naive one silently discards the offset. `int` is arbitrary
   precision, so Python will happily hand a peer a number that peer cannot hold.
 
-- **Java.** The same absent/null collapse, plus primitives that cannot be null at all — an
+- **Java.** The same absent/null collapse, plus primitives that cannot be null at all: an
   optional `int` has to be boxed to `Integer`, and Jackson needs explicit configuration before
   absent and null behave differently. `java.time` and the legacy `java.util.Date` coexist, and
   `LocalDate`, `Instant` and `ZonedDateTime` are not interchangeable. There are no unsigned
   integer types, so `u64` has nowhere to land.
 
-- **Rust** is the outlier — and that is the whole point. `Option<T>` makes absence explicit in
+- **Rust** is the outlier, and that is the whole point. `Option<T>` makes absence explicit in
   the type system, `Option<Option<T>>` distinguishes absent from null without a sentinel,
   enums are real sum types, there is no `null`, and integer width and signedness are part of
   the type. **Rust is the only one of these languages that can represent every distinction the
-  others lose.** That is why the contract belongs there — not because Rust is fast.
+  others lose.** That is why the contract belongs there, not because Rust is fast.
 
 ## The solution: the schema is a file, not code
 
@@ -87,7 +87,7 @@ schema User {
 ```python
 from seam import Schema, ValidationError
 
-User = Schema.load("contracts/user.seam")     # runtime — no Rust toolchain, no build step
+User = Schema.load("contracts/user.seam")     # runtime: no Rust toolchain, no build step
 
 try:
     user = User.validate(payload)
@@ -122,9 +122,9 @@ been getting this wrong for a decade.
 
 | `.seam` | Rust | Python | TypeScript | Java |
 |---|---|---|---|---|
-| `Date` | `NaiveDate` | `datetime.date` | ISO `string` — **not** `Date` | `LocalDate` |
+| `Date` | `NaiveDate` | `datetime.date` | ISO `string`, **not** `Date` | `LocalDate` |
 | `DateTime` | `DateTime<Utc>` | aware `datetime` | `Date` | `Instant` |
-| `u64` | `u64` | `int` | `bigint` — **not** `number` | `long`, range-checked |
+| `u64` | `u64` | `int` | `bigint`, **not** `number` | `long`, range-checked |
 | `i32` | `i32` | `int`, range-checked | `number` | `int` |
 
 Two opinionated calls fall out of this, and Seam makes them explicitly:
@@ -136,13 +136,13 @@ Two opinionated calls fall out of this, and Seam makes them explicitly:
 
 ## This is the actual product
 
-A Rust core with language bindings is not novel — `jsonschema-rs` already ships one. What Seam
+A Rust core with language bindings is not novel; `jsonschema-rs` already ships one. What Seam
 commits to is the part everyone else leaves undocumented:
 
 1. **A normative mapping specification.** Every row in the tables above is a written rule with
    a rationale, not an implementation detail that might change in a patch release.
-2. **A shared conformance suite.** A directory of plain-text cases — input, expected verdict,
-   expected error — that runs identically against *every* binding in CI. A binding that
+2. **A shared conformance suite.** A directory of plain-text cases (input, expected verdict,
+   expected error) that runs identically against *every* binding in CI. A binding that
    disagrees with the suite fails the build.
 
 ```json
@@ -159,20 +159,20 @@ real deliverable, and it is what survives even if someone reimplements the engin
 
 ## Fast
 
-Seam compiles a schema once into a validator tree and reuses it across every call — parsing and
-rule resolution happen at load time, not per payload. Validation walks the input directly
+Seam compiles a schema once into a validator tree and reuses it across every call, so parsing
+and rule resolution happen at load time, not per payload. Validation walks the input directly
 instead of building an intermediate object graph to throw away, and work stays on the Rust side
 of the FFI boundary, so a rejected payload never has to be materialized in the host language.
 
-**No performance numbers are published yet, deliberately.** The frequently cited 5–50x figure
+**No performance numbers are published yet, deliberately.** The frequently cited 5-50x figure
 from `pydantic-core` was measured against pure-Python Pydantic v1, and it does not transfer to a
 different engine with a different FFI shape. Seam will publish benchmarks with methodology,
-hardware, and reproduction scripts, measured against `msgspec` and `pydantic` v2 — which are the
-real bar — and not before. Until then, treat speed as a design goal, not a claim.
+hardware, and reproduction scripts, measured against `msgspec` and `pydantic` v2, which are the
+real bar. Until then, treat speed as a design goal, not a claim.
 
 ## Safe
 
-- **Memory safety** from the core outward — no hand-written C, no manual buffer arithmetic.
+- **Memory safety** from the core outward: no hand-written C, no manual buffer arithmetic.
 - **No panics cross the FFI boundary.** A failure surfaces as `ValidationError` in Python and
   `SeamValidationError` in JS. A panic reaching a foreign runtime is treated as a Seam bug.
 - **Schemas are declarative data, not executable code.** Loading a `.seam` file cannot run
@@ -185,30 +185,30 @@ real bar — and not before. Until then, treat speed as a design goal, not a cla
 
 ## Scope
 
-Seam is deliberately narrow. It is **not** a replacement for Protobuf, OpenAPI, or serde — it
+Seam is deliberately narrow. It is **not** a replacement for Protobuf, OpenAPI, or serde. It
 validates data at a boundary and states precisely what that data means. The goal is to nail the
 cases that cause the most cross-language bugs, not to cover every schema feature.
 
-**Phase 1 — Core + Python** *(current)*
+**Phase 1: Core + Python** *(current)*
 Strings, integers with explicit width and signedness, `f64`, `bool`, `Date`, `DateTime`, enums
 with fixed value sets, arrays, arbitrarily nested objects, and the full four-state absent/null
 matrix. Idiomatic errors through PyO3. The conformance suite is established here.
 
-**Phase 2 — Node.js** — the same surface via `napi-rs`, `bigint` for 64-bit integers, `Error`
+**Phase 2: Node.js.** The same surface via `napi-rs`, `bigint` for 64-bit integers, `Error`
 subclasses rather than generic throws, and the conformance suite green.
 
-**Phase 3 — WebAssembly** — browser-side validation via `wasm-bindgen`, so a frontend enforces
+**Phase 3: WebAssembly.** Browser-side validation via `wasm-bindgen`, so a frontend enforces
 the same contract as the service it calls.
 
-**Phase 4 — Expanded types** — unions and tagged variants, custom validators, string formats,
+**Phase 4: Expanded types.** Unions and tagged variants, custom validators, string formats,
 cross-field constraints, and date/time edge cases beyond the basics.
 
-**Phase 5 — JVM** — via the Panama FFM API (Java 22+), not JNI. This is honestly a large lift:
+**Phase 5: JVM.** Via the Panama FFM API (Java 22+), not JNI. This is honestly a large lift:
 off-heap memory management, its own platform matrix, and a Java ecosystem that expects a pure
 jar. It is on the roadmap because the Java pain described above is real, but it is a later phase
 and not a near-term promise.
 
-**Out of scope** — RPC and transport, general-purpose serialization, and code generation for
+**Out of scope:** RPC and transport, general-purpose serialization, and code generation for
 languages with no viable native FFI story.
 
 ## Architecture
@@ -219,7 +219,7 @@ A Cargo workspace. The engine lives in one crate; every binding is a thin transl
 seam/
 ├── Cargo.toml            # workspace root
 ├── spec/                 # normative mapping specification
-├── conformance/          # shared test cases — every binding runs these
+├── conformance/          # shared test cases, every binding runs these
 ├── seam-core/            # the engine: .seam parser, compiler, validator, errors
 ├── seam-macros/          # optional #[derive(Schema)] for Rust-first users
 ├── seam-py/              # PyO3 binding
@@ -264,7 +264,7 @@ prerequisite for everyone else.
 
 Seam is not the first tool near this problem, and the differences are worth stating.
 
-- **JSON Schema** is genuinely portable, and validators exist everywhere — but the specification
+- **JSON Schema** is genuinely portable, and validators exist everywhere, but the specification
   says little about how a validated document maps into each language's types. Two conformant
   validators can accept the same document and hand their host wildly different values. That gap
   is exactly where Seam lives.
@@ -285,4 +285,4 @@ specification and the conformance suite are being written alongside the engine, 
 
 ## License
 
-MIT OR Apache-2.0, at your option — the standard dual license of the Rust ecosystem.
+MIT OR Apache-2.0, at your option. This is the standard dual license of the Rust ecosystem.
