@@ -1,0 +1,55 @@
+{
+  "schema": "user",
+  "type": "User",
+  "base": { "id": 1, "name": "Gabriel", "plan": "pro", "nickname": null },
+  "cases": [
+    {
+      "name": "an array of the declared type",
+      "input": { "tags": ["a", "b"] },
+      "expect": "valid"
+    },
+    {
+      "name": "an empty array is fine",
+      "input": { "tags": [] },
+      "expect": "valid"
+    },
+    {
+      "name": "a null element is rejected when the element type is not nullable",
+      "note": "The path points at the element, not at the field.",
+      "input": { "tags": ["a", null] },
+      "expect": { "issues": [{ "path": "tags[1]", "code": "null_not_allowed" }] }
+    },
+    {
+      "name": "a wrongly typed element reports at its own index",
+      "input": { "tags": ["a", 7] },
+      "expect": { "issues": [{ "path": "tags[1]", "code": "type_mismatch" }] }
+    },
+    {
+      "name": "every bad element is reported, not just the first",
+      "input": { "tags": [1, "ok", 2] },
+      "expect": {
+        "issues": [
+          { "path": "tags[0]", "code": "type_mismatch" },
+          { "path": "tags[2]", "code": "type_mismatch" }
+        ]
+      }
+    },
+    {
+      "name": "max_items is enforced",
+      "input": {
+        "tags": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+      },
+      "expect": { "issues": [{ "path": "tags", "code": "too_many_items" }] }
+    },
+    {
+      "name": "an optional array may be absent",
+      "input": {},
+      "expect": "valid"
+    },
+    {
+      "name": "an optional non-nullable array may not be null",
+      "input": { "tags": null },
+      "expect": { "issues": [{ "path": "tags", "code": "null_not_allowed" }] }
+    }
+  ]
+}

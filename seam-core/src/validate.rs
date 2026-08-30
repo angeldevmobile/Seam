@@ -121,6 +121,22 @@ impl Validator<'_> {
     }
 
     fn value(&mut self, ty: &Type, value: &Value, depth: usize) {
+        // Applies to every string-shaped type, so it is checked once here
+        // rather than in each of String, Date, DateTime and Enum.
+        if let Value::String(s) = value {
+            if s.len() > self.limits.max_string_bytes {
+                self.push(
+                    Code::SizeExceeded,
+                    format!(
+                        "{} bytes exceeds the limit of {}",
+                        s.len(),
+                        self.limits.max_string_bytes
+                    ),
+                );
+                return;
+            }
+        }
+
         match ty {
             Type::Bool => self.expect(matches!(value, Value::Bool(_)), "bool", value),
             Type::Float => match value {
@@ -138,7 +154,9 @@ impl Validator<'_> {
             Type::Date => self.temporal(value, "date", validate_date),
             Type::DateTime => self.temporal(value, "datetime", validate_datetime),
             Type::Enum(allowed) => self.enumeration(allowed, value),
-            Type::Array(item) => self.array(item, value, depth),
+            Type::Array { item, item_nullable } => {
+                self.array(item, *item_nullable, value, depth);
+            }
             Type::Object(obj) => self.object(obj, value, depth),
             Type::Ref(name) => match self.schema.get(name) {
                 Some(obj) => self.object(obj, value, depth),
@@ -203,7 +221,7 @@ impl Validator<'_> {
         }
     }
 
-    fn array(&mut self, item: &Type, value: &Value, depth: usize) {
+    fn array(&mut self, item: &Type, item_nullable: bool, value: &Value, depth: usize) {
         if !self.depth_ok(depth) {
             return;
         }
@@ -223,8 +241,13 @@ impl Validator<'_> {
             return;
         }
         for (i, v) in items.iter().enumerate() {
-            self.within(Segment::Index(i), |validator| {
-                validator.value(item, v, depth + 1);
+            self.within(Segment::Index(i), |validator| match v {
+                Value::Null if item_nullable => {}
+                Value::Null => validator.push(
+                    Code::NullNotAllowed,
+                    "must not be null; declare the element as `T?` to allow it".to_string(),
+                ),
+                v => validator.value(item, v, depth + 1),
             });
         }
     }
@@ -350,7 +373,7 @@ mod tests {
                 },
                 Field {
                     name: "tags".into(),
-                    ty: Type::Array(Box::new(Type::String)),
+                    ty: Type::Array { item: Box::new(Type::String), item_nullable: false },
                     presence: Presence::optional(),
                     rules: vec![Rule::MaxItems(3)],
                 },
@@ -495,5 +518,62 @@ mod tests {
         let v = with("tags", Value::Array(vec![Value::String("a".into()); 5]));
         let err = validate(&user_schema(), "User", &v, limits);
         assert!(matches!(err, Err(ref e) if e.issues.iter().any(|i| i.code == Code::SizeExceeded)));
+    }
+
+    #[test]
+    fn limits_stop_an_oversized_string() {
+        let limits = Limits { max_string_bytes: 8, ..Limits::DEFAULT };
+        let v = with("name", Value::String("a".repeat(9)));
+        let err = validate(&user_schema(), "User", &v, limits);
+        assert!(matches!(err, Err(ref e) if e.issues.iter().any(|i| i.code == Code::SizeExceeded)));
+
+        let ok = with("name", Value::String("a".repeat(8)));
+        assert!(validate(&user_schema(), "User", &ok, limits).is_ok());
+    }
+
+    /// The limit is in bytes, so a multi-byte character counts as its encoded
+    /// width. A limit measured in characters would not bound memory.
+    #[test]
+    fn the_string_limit_counts_bytes_not_characters() {
+        let limits = Limits { max_string_bytes: 4, ..Limits::DEFAULT };
+        // Three characters, six bytes in UTF-8.
+        let v = with("name", Value::String("ñññ".into()));
+        let err = validate(&user_schema(), "User", &v, limits);
+        assert!(matches!(err, Err(ref e) if e.issues.iter().any(|i| i.code == Code::SizeExceeded)));
+    }
+
+    #[test]
+    fn a_null_array_item_is_rejected_unless_the_element_allows_it() {
+        let with_items = |item_nullable| {
+            let mut schema = Schema::default();
+            schema.types.insert(
+                "T".into(),
+                ObjectType {
+                    name: "T".into(),
+                    deny_unknown_fields: false,
+                    fields: vec![Field {
+                        name: "xs".into(),
+                        ty: Type::Array { item: Box::new(Type::String), item_nullable },
+                        presence: Presence::required(),
+                        rules: vec![],
+                    }],
+                },
+            );
+            schema
+        };
+        let payload = obj(&[(
+            "xs",
+            Value::Array(vec![Value::String("a".into()), Value::Null]),
+        )]);
+
+        let err = validate(&with_items(false), "T", &payload, Limits::DEFAULT)
+            .expect_err("a null element must not pass `[String]`");
+        assert_eq!(err.issues.len(), 1);
+        assert_eq!(
+            err.issues.first().map(|i| (i.path.render(), i.code)),
+            Some(("xs[1]".to_string(), Code::NullNotAllowed))
+        );
+
+        assert!(validate(&with_items(true), "T", &payload, Limits::DEFAULT).is_ok());
     }
 }

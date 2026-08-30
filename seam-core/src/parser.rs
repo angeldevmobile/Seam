@@ -375,16 +375,9 @@ impl Parser {
     /// Returns the type and whether a `?` suffix marked it nullable.
     fn ty(&mut self) -> Result<(Type, bool), ParseError> {
         let base = if self.eat(&Tok::LBracket) {
-            let (inner, inner_nullable) = self.ty()?;
-            if inner_nullable {
-                return self.error(
-                    "nullable array items are not supported; \
-                     nullability applies to a field, not to an element"
-                        .into(),
-                );
-            }
+            let (item, item_nullable) = self.ty()?;
             self.expect(&Tok::RBracket)?;
-            Type::Array(Box::new(inner))
+            Type::Array { item: Box::new(item), item_nullable }
         } else if self.at_keyword("enum") {
             self.enumeration()?
         } else {
@@ -585,7 +578,10 @@ schema User {
             field("plan").ty,
             Type::Enum(vec!["free".into(), "pro".into(), "enterprise".into()])
         );
-        assert_eq!(field("tags").ty, Type::Array(Box::new(Type::String)));
+        assert_eq!(
+            field("tags").ty,
+            Type::Array { item: Box::new(Type::String), item_nullable: false }
+        );
         assert_eq!(field("name").rules, vec![Rule::MinLen(3), Rule::MaxLen(64)]);
         assert_eq!(field("age").rules, vec![Rule::Range { min: 18, max: 120 }]);
         assert_eq!(field("tags").rules, vec![Rule::MaxItems(10)]);
@@ -649,10 +645,22 @@ schema User {
     }
 
     #[test]
-    fn nullable_array_items_are_rejected_with_a_reason() {
-        assert!(err("schema A { x: [String?] }")
-            .message
-            .contains("nullable array items"));
+    fn array_items_carry_their_own_nullability() {
+        let s = parse("schema A { x: [String?]\n y: optional [u8]? }").expect("should parse");
+        let a = s.get("A").expect("A should exist");
+
+        let x = a.field("x").expect("x should exist");
+        assert_eq!(
+            x.ty,
+            Type::Array { item: Box::new(Type::String), item_nullable: true }
+        );
+        // The list itself is required and non-null; only its elements may be null.
+        assert_eq!(x.presence, Presence::required());
+
+        // Element nullability and field nullability are independent.
+        let y = a.field("y").expect("y should exist");
+        assert_eq!(y.presence, Presence::optional_nullable());
+        assert!(matches!(y.ty, Type::Array { item_nullable: false, .. }));
     }
 
     #[test]

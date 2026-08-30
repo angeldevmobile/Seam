@@ -96,6 +96,27 @@ binding, which is the only property that makes the constraint portable.
 
 ## 6. Objects and arrays
 
+An array element has two states, a value or null, so only nullability applies to
+it. Absence is a property of a key, and an array has no keys: a missing element
+would change the length, which is a different fact.
+
+Element nullability is therefore independent of the field's:
+
+| `.seam` | The list | Its elements |
+|---|---|---|
+| `[String]` | required, non-null | non-null |
+| `[String?]` | required, non-null | may be null |
+| `optional [String]?` | may be absent or null | non-null |
+| `optional [String?]?` | may be absent or null | may be null |
+
+| `.seam` | Rust | Python | TypeScript | Java |
+|---|---|---|---|---|
+| `[String]` | `Vec<String>` | `list[str]` | `string[]` | `List<String>` |
+| `[String?]` | `Vec<Option<String>>` | `list[str \| None]` | `(string \| null)[]` | `List<@Nullable String>` |
+
+A null element where the type does not allow one is `null_not_allowed` at the
+element's own path: `tags[1]`, not `tags`.
+
 Nesting is arbitrarily deep, bounded by `max_depth`.
 
 Unknown keys are rejected by default. At a boundary an unexpected key is more
@@ -127,12 +148,18 @@ condition produces one is breaking.
 
 Enforced in the core so bindings inherit them.
 
-| Limit | Default |
-|---|---|
-| `max_depth` | 64 |
-| `max_items` | 10 000 |
-| `max_string_bytes` | 1 MiB |
-| `max_object_keys` | 1 000 |
+| Limit | Default | Applies to |
+|---|---|---|
+| `max_depth` | 64 | any object or array, as the validator descends |
+| `max_items` | 10 000 | the length of any one array |
+| `max_string_bytes` | 1 MiB | any string value, including `Date`, `DateTime` and enum values |
+| `max_object_keys` | 1 000 | the number of keys in any one object |
+
+`max_string_bytes` counts **bytes**, not characters. A limit measured in
+characters would not bound memory, which is the only thing it is there for.
+
+Exceeding any of these is `size_exceeded`, except depth, which is
+`depth_exceeded`.
 
 These are defaults, not a security boundary. A service taking untrusted input
 should set them from what a legitimate request actually looks like.

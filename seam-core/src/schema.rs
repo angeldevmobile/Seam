@@ -77,7 +77,12 @@ pub enum Type {
     /// An instant with a mandatory UTC offset.
     DateTime,
     Enum(Vec<String>),
-    Array(Box<Type>),
+    /// An element has two states, a value or null, so only nullability applies
+    /// to it. Absence is a property of a key, and an array has no keys.
+    Array {
+        item: Box<Type>,
+        item_nullable: bool,
+    },
     Object(Box<ObjectType>),
     Ref(String),
 }
@@ -92,7 +97,7 @@ impl Type {
             Type::Date => "date",
             Type::DateTime => "datetime",
             Type::Enum(_) => "enum",
-            Type::Array(_) => "array",
+            Type::Array { .. } => "array",
             Type::Object(_) | Type::Ref(_) => "object",
         }
     }
