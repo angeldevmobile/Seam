@@ -6,6 +6,9 @@
   "repository": "https://github.com/angeldevmobile/Seam",
   "main": "index.js",
   "types": "index.d.ts",
+  "bin": {
+    "seam": "cli.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -20,14 +23,17 @@
   "scripts": {
     "build": "napi build --platform --release --js native.js --dts native.d.ts",
     "build:debug": "napi build --platform --js native.js --dts native.d.ts",
-    "test": "node --test __test__/binding.test.mjs __test__/conformance.test.mjs"
+    "test": "node --test __test__/binding.test.mjs __test__/conformance.test.mjs __test__/typegen.test.mjs"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0"
+    "@napi-rs/cli": "^3.0.0",
+    "typescript": "^6.0.3"
   },
   "files": [
     "index.js",
     "index.d.ts",
+    "typegen.js",
+    "cli.js",
     "native.js",
     "native.d.ts",
     "*.node"

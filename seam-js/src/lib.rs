@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 use seam_core::input::{Input, Kind};
 use seam_core::json::Ref as JsonRef;
-use seam_core::schema::{IntWidth, ObjectType, Type};
+use seam_core::schema::{IntWidth, ObjectType, Rule, Type};
 use seam_core::value::{Int, Slot};
 
 /// Beyond this a JavaScript `number` no longer holds every integer, so a value
@@ -74,6 +74,22 @@ impl Schema {
     #[napi]
     pub fn type_names(&self) -> Vec<String> {
         self.inner.types.keys().cloned().collect()
+    }
+
+    /// The schema as plain data, for tooling that generates types.
+    ///
+    /// Deliberately not a validator: it carries shape, not rules-as-behaviour.
+    /// Each binding renders its own language's types from this, which is why
+    /// it is exposed rather than the code generator being written in Rust.
+    /// The keys are camelCase here and snake_case in Python for the same
+    /// reason: the data is crossing into a language, not out of one.
+    #[napi]
+    pub fn describe<'env>(&self, env: &'env Env) -> Result<Object<'env>> {
+        let mut out = Object::new(env)?;
+        for (name, ty) in &self.inner.types {
+            out.set(name.as_str(), describe_object(env, ty)?)?;
+        }
+        Ok(out)
     }
 
     /// Binds one type. Everything that does not depend on the payload is
@@ -186,6 +202,119 @@ fn as_json_bytes(value: &Unknown<'_>) -> Result<Option<Vec<u8>>> {
         }
         _ => Ok(None),
     }
+}
+
+// --------------------------------------------------------- describing
+
+fn describe_object<'env>(env: &'env Env, ty: &ObjectType) -> Result<Object<'env>> {
+    let mut fields = env.create_array(ty.fields.len() as u32)?;
+    for (i, field) in ty.fields.iter().enumerate() {
+        let mut f = Object::new(env)?;
+        f.set("name", field.name.as_str())?;
+        f.set("type", describe_type(env, &field.ty)?)?;
+        // Two keys, not one, because absence and nullability are two axes.
+        f.set("optional", field.presence.optional)?;
+        f.set("nullable", field.presence.nullable)?;
+        f.set("rules", describe_rules(env, &field.rules)?)?;
+        fields.set(i as u32, f)?;
+    }
+
+    let mut out = Object::new(env)?;
+    out.set("name", ty.name.as_str())?;
+    out.set("denyUnknownFields", ty.deny_unknown_fields)?;
+    // Declaration order, not sorted: it is the order errors are reported in,
+    // and the order the generated type should read in.
+    out.set("fields", fields.coerce_to_object()?)?;
+    Ok(out)
+}
+
+fn describe_rules<'env>(env: &'env Env, rules: &[Rule]) -> Result<Object<'env>> {
+    let mut out = env.create_array(rules.len() as u32)?;
+    for (i, rule) in rules.iter().enumerate() {
+        let mut r = Object::new(env)?;
+        // The rule names are the `.seam` spelling, so they stay snake_case:
+        // they are values from the schema language, not JavaScript keys.
+        match rule {
+            Rule::MinLen(n) => {
+                r.set("rule", "min_len")?;
+                r.set("value", *n as f64)?;
+            }
+            Rule::MaxLen(n) => {
+                r.set("rule", "max_len")?;
+                r.set("value", *n as f64)?;
+            }
+            Rule::MinItems(n) => {
+                r.set("rule", "min_items")?;
+                r.set("value", *n as f64)?;
+            }
+            Rule::MaxItems(n) => {
+                r.set("rule", "max_items")?;
+                r.set("value", *n as f64)?;
+            }
+            Rule::Range { min, max } => {
+                r.set("rule", "range")?;
+                // A `u64` bound does not fit a `number`, and a bound that is
+                // not the bound would be worse than no bound at all.
+                r.set("min", BigInt::from(*min))?;
+                r.set("max", BigInt::from(*max))?;
+            }
+        }
+        out.set(i as u32, r)?;
+    }
+    out.coerce_to_object()
+}
+
+fn describe_type<'env>(env: &'env Env, ty: &Type) -> Result<Object<'env>> {
+    let mut out = Object::new(env)?;
+    match ty {
+        Type::Bool => {
+            out.set("kind", "bool")?;
+        }
+        Type::Float => {
+            out.set("kind", "float")?;
+        }
+        Type::String => {
+            out.set("kind", "string")?;
+        }
+        Type::Date => {
+            out.set("kind", "date")?;
+        }
+        Type::DateTime => {
+            out.set("kind", "datetime")?;
+        }
+        Type::Int(int_ty) => {
+            out.set("kind", "int")?;
+            out.set("name", int_ty.name())?;
+            out.set("signed", int_ty.signed)?;
+            // What tells a generator to write `bigint` rather than `number`.
+            // Decided in the core so no binding re-derives the rule.
+            out.set("fitsJsNumber", int_ty.fits_js_number())?;
+        }
+        Type::Enum(values) => {
+            out.set("kind", "enum")?;
+            let mut list = env.create_array(values.len() as u32)?;
+            for (i, v) in values.iter().enumerate() {
+                list.set(i as u32, v.as_str())?;
+            }
+            out.set("values", list.coerce_to_object()?)?;
+        }
+        Type::Array { item, item_nullable } => {
+            out.set("kind", "array")?;
+            out.set("item", describe_type(env, item)?)?;
+            // An element has two states, a value or null. Absence is a
+            // property of a key, and an array has no keys.
+            out.set("itemNullable", *item_nullable)?;
+        }
+        Type::Object(obj) => {
+            out.set("kind", "object")?;
+            out.set("object", describe_object(env, obj)?)?;
+        }
+        Type::Ref(name) => {
+            out.set("kind", "ref")?;
+            out.set("name", name.as_str())?;
+        }
+    }
+    Ok(out)
 }
 
 // ------------------------------------------------------------- reading JS

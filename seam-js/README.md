@@ -83,6 +83,58 @@ legitimate request looks like:
 schema.validator('User', { maxItems: 100, maxStringBytes: 4096 })
 ```
 
+## Generated TypeScript
+
+```bash
+npx seam typegen contracts/user.seam     # writes contracts/user.types.ts
+```
+
+The generated file is **types only**: no imports, no code, nothing to run.
+Delete it and everything still works; you lose static checking and nothing
+else. Validation happens in the engine, against the `.seam` file, at runtime.
+
+```ts
+import { Schema } from 'seam'
+import type { UserTypes } from './contracts/user.types'
+
+const schema = Schema.load<UserTypes>('contracts/user.seam')
+const user = schema.validator('User').validate(rawRequestBody)
+
+user.id            // bigint
+user.plan          // 'free' | 'pro' | 'enterprise'
+user.bio           // string | undefined
+```
+
+Passing the generated map to `Schema.load` types every validator it hands out,
+so `validator('Usr')` is a compile error rather than a runtime one. Without it
+nothing breaks and `validate` returns `unknown`, which is the honest type for a
+payload nothing has described.
+
+The mapping is the one TypeScript already had words for:
+
+| `.seam` | TypeScript |
+|---|---|
+| `String` | `name: string` |
+| `String?` | `nickname: string \| null` |
+| `optional String` | `bio?: string` |
+| `optional String?` | `avatar?: string \| null` |
+| `u8`-`u32`, `i8`-`i32`, `f64` | `number` |
+| `u64`, `i64` | `bigint` |
+| `Date` | `string` |
+| `DateTime` | `Date` |
+| `enum { free, pro }` | `'free' \| 'pro'` |
+| `[String?]` | `(string \| null)[]` |
+
+`?:` is the absence axis and `| null` is the nullability axis, which is the
+same distinction `NotRequired` draws in Python. They are independent, and a
+field may carry both.
+
+In CI, `--check` fails if a generated file has fallen behind its schema:
+
+```bash
+npx seam typegen --check contracts/*.seam
+```
+
 ## Status
 
 Early development, not yet on npm. **Node 20 or newer**: the compiled module
@@ -95,5 +147,7 @@ Build from a checkout:
 cd seam-js && npm install && npm run build && npm test
 ```
 
-Generated TypeScript types from a `.seam` file are not implemented yet; the
-Python side has `seam typegen` and Node will get the same.
+The `seam` command is installed by both this package and the Python one. They
+take the same subcommand and the same flags on purpose, but if you install both
+globally, whichever is first on `PATH` wins; `npx seam` always reaches this
+one.

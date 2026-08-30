@@ -88,6 +88,18 @@ class Schema {
   }
 
   /**
+   * The schema as plain data, for tooling that generates types.
+   *
+   * Deliberately not a validator: it carries shape, not rules-as-behaviour.
+   * `seam typegen` is the only caller in this package, and it is written here
+   * rather than in Rust so that the language's own types are chosen by the
+   * binding that speaks it.
+   */
+  describe() {
+    return this.#inner.describe()
+  }
+
+  /**
    * Binds one type for repeated validation. Everything that does not depend on
    * the payload is resolved here rather than on every call.
    */
