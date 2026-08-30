@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.rs      text eol=lf
+*.toml    text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.seam    text eol=lf
+*.py      text eol=lf
+
+*.png     binary
+*.jpg     binary
+*.ico     binary
