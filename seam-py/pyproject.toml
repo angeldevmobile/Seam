@@ -16,11 +16,16 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+dependencies = ["typing_extensions>=4.6; python_version < '3.11'"]
+
+[project.scripts]
+seam = "seam.cli:main"
+
 [project.urls]
 Repository = "https://github.com/angeldevmobile/Seam"
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=7", "mypy>=1.8"]
 
 [tool.maturin]
 module-name = "seam._seam"

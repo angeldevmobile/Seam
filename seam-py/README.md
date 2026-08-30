@@ -48,6 +48,44 @@ from seam import Limits
 schema.validate("User", payload, Limits(max_items=100, max_string_bytes=4096))
 ```
 
+## Static types
+
+A schema loaded at runtime is opaque to a type checker, by construction. So the
+`.seam` file feeds two paths: validation at runtime, and types through
+`seam typegen`.
+
+```bash
+seam typegen contracts/user.seam        # writes contracts/user_types.py
+```
+
+```python
+from contracts.user_types import validate_user
+
+user = validate_user(payload)
+user["name"]        # mypy knows this is str
+user["nmae"]        # mypy rejects it
+```
+
+The four presence states land on Python's own vocabulary for them, which is why
+`TypedDict` was the right target:
+
+| `.seam` | generated |
+|---|---|
+| `String` | `name: str` |
+| `String?` | `nickname: str \| None` |
+| `optional String` | `bio: NotRequired[str]` |
+| `optional String?` | `avatar: NotRequired[str \| None]` |
+
+**The generated file holds no rules.** Delete it and everything still runs; you
+only lose static checking. That is the test that it is not a second source of
+truth.
+
+Keep it honest in CI:
+
+```bash
+seam typegen --check contracts/*.seam   # fails if stale or missing
+```
+
 ## Status
 
 Early development, not yet on PyPI. Build from a checkout:
@@ -56,6 +94,3 @@ Early development, not yet on PyPI. Build from a checkout:
 pip install ./seam-py
 pytest seam-py/tests
 ```
-
-Static types via generated `TypedDict`s (`seam typegen`) are not implemented
-yet. See the repository README for the roadmap.

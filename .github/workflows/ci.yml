@@ -73,5 +73,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: seam-py
-      - run: pip install ./seam-py pytest
+      # mypy is not optional here: the generated-types tests assert that a
+      # type checker actually rejects a misspelled key. Without it they skip,
+      # and the whole static-typing claim goes unverified.
+      - run: pip install ./seam-py pytest mypy
       - run: pytest seam-py/tests -q

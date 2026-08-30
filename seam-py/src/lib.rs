@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 use seam_core::error::Segment;
-use seam_core::schema::{ObjectType, Type};
+use seam_core::schema::{ObjectType, Rule, Type};
 use seam_core::value::Int;
 use seam_core::{Code, Path, Value};
 
@@ -113,6 +113,19 @@ impl Schema {
         self.inner.types.keys().cloned().collect()
     }
 
+    /// The schema as plain data, for tooling that generates types.
+    ///
+    /// Deliberately not a validator: it carries shape, not rules-as-behaviour.
+    /// Each binding renders its own language's types from this, which is why
+    /// it is exposed rather than the code generator being written in Rust.
+    fn describe<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let out = PyDict::new(py);
+        for (name, ty) in &self.inner.types {
+            out.set_item(name, describe_object(py, ty)?)?;
+        }
+        Ok(out)
+    }
+
     #[pyo3(signature = (type_name, payload, limits=None))]
     fn validate<'py>(
         &self,
@@ -156,6 +169,102 @@ impl Schema {
     fn __repr__(&self) -> String {
         format!("Schema(types={:?})", self.type_names())
     }
+}
+
+fn describe_object<'py>(py: Python<'py>, ty: &ObjectType) -> PyResult<Bound<'py, PyDict>> {
+    let fields = PyList::empty(py);
+    for field in &ty.fields {
+        let f = PyDict::new(py);
+        f.set_item("name", &field.name)?;
+        f.set_item("type", describe_type(py, &field.ty)?)?;
+        f.set_item("optional", field.presence.optional)?;
+        f.set_item("nullable", field.presence.nullable)?;
+
+        let rules = PyList::empty(py);
+        for rule in &field.rules {
+            let r = PyDict::new(py);
+            match rule {
+                Rule::MinLen(n) => {
+                    r.set_item("rule", "min_len")?;
+                    r.set_item("value", n)?;
+                }
+                Rule::MaxLen(n) => {
+                    r.set_item("rule", "max_len")?;
+                    r.set_item("value", n)?;
+                }
+                Rule::MinItems(n) => {
+                    r.set_item("rule", "min_items")?;
+                    r.set_item("value", n)?;
+                }
+                Rule::MaxItems(n) => {
+                    r.set_item("rule", "max_items")?;
+                    r.set_item("value", n)?;
+                }
+                Rule::Range { min, max } => {
+                    r.set_item("rule", "range")?;
+                    r.set_item("min", min)?;
+                    r.set_item("max", max)?;
+                }
+            }
+            rules.append(r)?;
+        }
+        f.set_item("rules", rules)?;
+        fields.append(f)?;
+    }
+
+    let out = PyDict::new(py);
+    out.set_item("name", &ty.name)?;
+    out.set_item("deny_unknown_fields", ty.deny_unknown_fields)?;
+    out.set_item("fields", fields)?;
+    Ok(out)
+}
+
+fn describe_type<'py>(py: Python<'py>, ty: &Type) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    match ty {
+        Type::Bool => {
+            out.set_item("kind", "bool")?;
+        }
+        Type::Float => {
+            out.set_item("kind", "float")?;
+        }
+        Type::String => {
+            out.set_item("kind", "string")?;
+        }
+        Type::Date => {
+            out.set_item("kind", "date")?;
+        }
+        Type::DateTime => {
+            out.set_item("kind", "datetime")?;
+        }
+        Type::Int(int_ty) => {
+            out.set_item("kind", "int")?;
+            out.set_item("name", int_ty.name())?;
+            out.set_item("signed", int_ty.signed)?;
+            // What the JS binding needs to choose `bigint` over `number`, and
+            // what any language needs to know it must range-check on the way
+            // out. Kept here so no binding has to re-derive it.
+            out.set_item("fits_js_number", int_ty.fits_js_number())?;
+        }
+        Type::Enum(values) => {
+            out.set_item("kind", "enum")?;
+            out.set_item("values", values.clone())?;
+        }
+        Type::Array { item, item_nullable } => {
+            out.set_item("kind", "array")?;
+            out.set_item("item", describe_type(py, item)?)?;
+            out.set_item("item_nullable", item_nullable)?;
+        }
+        Type::Object(obj) => {
+            out.set_item("kind", "object")?;
+            out.set_item("object", describe_object(py, obj)?)?;
+        }
+        Type::Ref(name) => {
+            out.set_item("kind", "ref")?;
+            out.set_item("name", name)?;
+        }
+    }
+    Ok(out)
 }
 
 fn raise(py: Python<'_>, issues: Vec<Issue>) -> PyErr {
