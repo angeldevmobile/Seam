@@ -164,9 +164,10 @@ and rule resolution happen at load time rather than per payload. That part works
 
 **The rest is being worked on in the open, and the benchmarks say where it stands.** Seam
 validates the host's objects in place, with no intermediate copy, and resolves everything that
-does not depend on the payload when a validator is bound. It currently costs about **5.6x
-msgspec** and **1.1 to 1.3x pydantic v2** on a flat payload, rising to 12x and 3.5x on
-array-heavy ones. It is slower than both in every scenario measured.
+does not depend on the payload when a validator is bound, and builds nothing for an error until
+something reads it. It currently costs about **5.4x msgspec** and **1.1 to 1.3x pydantic v2** on
+a flat payload, rising to 12x and 3.5x on array-heavy ones. It is slower than both in every
+scenario measured.
 
 Full methodology, hardware, library versions, the remaining plan and scripts that reproduce all
 of it are in [`benchmarks/`](benchmarks/). Read the numbers rather than this paragraph.

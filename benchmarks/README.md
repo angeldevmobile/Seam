@@ -16,19 +16,19 @@ Median nanoseconds per validation of an already-parsed dict. Lower is better.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 1 919 | **344** | 1 662 |
-| nested + date | 3 858 | **498** | 2 891 |
-| array of 100 strings | 10 419 | **862** | 3 011 |
-| rejected payload | 3 655 | **957** | 2 145 |
+| flat, 6 fields | 1 866 | **345** | 1 626 |
+| nested + date | 3 770 | **502** | 2 708 |
+| array of 100 strings | 10 278 | **845** | 2 925 |
+| rejected payload | 2 447 | **954** | 1 974 |
 
 Relative to the fastest in each row:
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 5.6x | 1.00x | 4.8x |
-| nested + date | 7.7x | 1.00x | 5.8x |
-| array of 100 strings | 12.1x | 1.00x | 3.5x |
-| rejected payload | 3.8x | 1.00x | 2.2x |
+| flat, 6 fields | 5.4x | 1.00x | 4.7x |
+| nested + date | 7.5x | 1.00x | 5.4x |
+| array of 100 strings | 12.2x | 1.00x | 3.5x |
+| rejected payload | 2.6x | 1.00x | 2.1x |
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
@@ -163,19 +163,43 @@ keys.
 
 Together the flat row went from roughly 2 800 to roughly 1 900 ns.
 
-### 4. Build validation issues lazily — next
+### 4. Build validation issues lazily — done
 
-The rejected row is still *more expensive than the valid path*: nothing is built
-for the result, but `ValidationError`, a list, the `Issue` objects and their
-attributes are. Seam's error contract is richer than a message string and this
-is its price. Deferring the `Issue` objects until `.issues` is read would keep
-the contract and stop charging for it up front.
+Measured on a two-field schema, valid versus rejected in the same process:
 
-### 5. Cheaper classification
+| | before | after |
+|---|---:|---:|
+| cost of the exception | 1 802 ns | **601 ns** |
 
-`classify` walks up to seven `is_instance_of` checks per value. Ordering them by
-what payloads actually contain, or checking the type object once, is untested
-ground.
+A bare `raise`/`except` of a Python exception with no attributes costs 206 ns on
+this machine, so what remains above that floor is now about 395 ns.
+
+The exception is declared in Python and overrides no `__init__`, so raising it
+is C-level bookkeeping plus one allocation on the Rust side. Everything else —
+the path strings, the `Issue` objects, the summary — is produced when read.
+A caller that lets the error propagate pays for none of it.
+
+The whole rejected row went from 3 655 to about 2 400 ns, from 1.8x to 1.2x
+pydantic.
+
+### 5. Cheaper classification — dropped, it would not help
+
+`classify` walks up to seven `is_instance_of` checks, so ordering them by what
+payloads actually contain looked promising. Measuring six fields of a single
+type, by that type's position in the chain:
+
+| type | position | per field |
+|---|---|---:|
+| `bool` | 2nd | 244 ns |
+| `int` | 3rd | 266 ns |
+| `str` | 4th | 303 ns |
+| `float` | 5th | 248 ns |
+
+If position drove the cost, `float` at fifth would be the most expensive. It is
+the second cheapest. The spread is explained by the work each type needs — `str`
+has to be decoded — and not by how many checks preceded it, so each check must
+cost very little. Reordering would buy nothing, and the idea is dropped rather
+than implemented on the strength of how plausible it sounded.
 
 ## Caveats
 

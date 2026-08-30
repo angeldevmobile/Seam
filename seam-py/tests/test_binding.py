@@ -219,3 +219,55 @@ def test_the_generated_module_binds_once(tmp_path):
     body = generate(seam_file)
     assert '.validator("U")' in body
     assert ".validate(" not in body
+
+
+# --- the error object -------------------------------------------------------
+
+
+def test_the_error_is_a_normal_exception(user):
+    """It is declared in Python and raised from Rust; it must still behave."""
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {**base(), "name": "ab"})
+    err = excinfo.value
+    assert isinstance(err, Exception)
+    assert isinstance(err, ValidationError)
+
+
+def test_str_gives_the_summary_without_touching_issues(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {**base(), "name": "ab"})
+    text = str(excinfo.value)
+    assert "name" in text and "too_short" in text
+
+
+def test_the_summary_says_how_many_more_there_are(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {"id": "x", "name": "ab", "plan": "no", "nickname": None})
+    assert "and 2 more" in str(excinfo.value)
+
+
+def test_len_counts_the_issues(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {"id": "x", "name": "ab", "plan": "no", "nickname": None})
+    assert len(excinfo.value) == 3
+    assert len(excinfo.value.issues) == 3
+
+
+def test_issues_are_built_on_every_read_and_are_equal(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {**base(), "name": "ab"})
+    err = excinfo.value
+    first, second = err.issues, err.issues
+    assert [(i.path, i.code) for i in first] == [(i.path, i.code) for i in second]
+
+
+def test_repr_is_readable(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", {**base(), "name": "ab"})
+    assert repr(excinfo.value).startswith("ValidationError(")
+
+
+def test_an_unknown_type_reports_as_an_issue(user):
+    with pytest.raises(ValidationError) as excinfo:
+        user.validator("Nope")
+    assert excinfo.value.code == "unknown_type"

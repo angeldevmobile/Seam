@@ -5,7 +5,8 @@
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple, PyType};
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -14,9 +15,75 @@ use std::sync::Arc;
 use seam_core::input::{Input, Kind};
 use seam_core::schema::{ObjectType, Rule, Type};
 use seam_core::value::{Int, Slot};
+use seam_core::Code;
 
-create_exception!(_seam, ValidationError, PyException);
 create_exception!(_seam, ParseError, PyException);
+
+/// What a `ValidationError` carries, with nothing built until it is read.
+///
+/// The exception itself is declared in Python and overrides no `__init__`, so
+/// raising costs one allocation here and the interpreter's own C-level
+/// bookkeeping. The path strings, the `Issue` objects and the summary are all
+/// produced on first access. Rejecting a request is a hot path in any service
+/// facing a network, and it should not cost more than accepting one.
+#[pyclass(frozen, skip_from_py_object, module = "seam")]
+pub struct Issues {
+    inner: Vec<seam_core::Issue>,
+}
+
+#[pymethods]
+impl Issues {
+    fn list<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let out = PyList::empty(py);
+        for issue in &self.inner {
+            out.append(Issue {
+                path: issue.path.render(),
+                code: issue.code.as_str().to_string(),
+                message: issue.message.clone(),
+            })?;
+        }
+        Ok(out)
+    }
+
+    fn summary(&self) -> String {
+        match self.inner.split_first() {
+            None => "validation failed".to_string(),
+            Some((first, [])) => {
+                format!(
+                    "{}: {} ({})",
+                    first.path.render(),
+                    first.message,
+                    first.code
+                )
+            }
+            Some((first, rest)) => format!(
+                "{}: {} ({}), and {} more",
+                first.path.render(),
+                first.message,
+                first.code,
+                rest.len()
+            ),
+        }
+    }
+
+    fn first_path(&self) -> String {
+        self.inner
+            .first()
+            .map_or_else(String::new, |i| i.path.render())
+    }
+
+    fn first_code(&self) -> &str {
+        self.inner.first().map_or("", |i| i.code.as_str())
+    }
+
+    fn first_message(&self) -> &str {
+        self.inner.first().map_or("", |i| i.message.as_str())
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+}
 
 #[pyclass(frozen, get_all, skip_from_py_object, module = "seam")]
 #[derive(Clone)]
@@ -144,9 +211,14 @@ impl Schema {
         limits: Option<&Limits>,
     ) -> PyResult<Validator> {
         if self.inner.get(type_name).is_none() {
-            return Err(ValidationError::new_err(format!(
-                "schema declares no type named `{type_name}`"
-            )));
+            return Err(raise(
+                py,
+                one_issue(
+                    type_name,
+                    Code::UnknownType,
+                    format!("schema declares no type named `{type_name}`"),
+                ),
+            ));
         }
         let datetime = py.import("datetime")?;
         Ok(Validator {
@@ -217,10 +289,14 @@ impl Validator {
         let py = payload.py();
 
         let Some(object_type) = self.schema.get(&self.type_name) else {
-            return Err(ValidationError::new_err(format!(
-                "schema declares no type named `{}`",
-                self.type_name
-            )));
+            return Err(raise(
+                py,
+                one_issue(
+                    &self.type_name,
+                    Code::UnknownType,
+                    format!("schema declares no type named `{}`", self.type_name),
+                ),
+            ));
         };
 
         // Read in place. Nothing is copied before the rules run, so a rejected
@@ -228,16 +304,7 @@ impl Validator {
         let input = PyInput::new(payload.clone(), &self.bindings);
 
         if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
-            let issues = e
-                .issues
-                .into_iter()
-                .map(|i| Issue {
-                    path: i.path.render(),
-                    code: i.code.as_str().to_string(),
-                    message: i.message,
-                })
-                .collect();
-            return Err(raise(py, issues));
+            return Err(raise(py, e.issues));
         }
 
         Out { py, schema: &self.schema, bindings: &self.bindings }.object(object_type, payload)
@@ -340,34 +407,55 @@ fn describe_type<'py>(py: Python<'py>, ty: &Type) -> PyResult<Bound<'py, PyDict>
     Ok(out)
 }
 
-fn raise(py: Python<'_>, issues: Vec<Issue>) -> PyErr {
-    let summary = match issues.split_first() {
-        None => "validation failed".to_string(),
-        Some((first, [])) => format!("{}: {} ({})", first.path, first.message, first.code),
-        Some((first, rest)) => format!(
-            "{}: {} ({}), and {} more",
-            first.path,
-            first.message,
-            first.code,
-            rest.len()
-        ),
-    };
+/// Builds the exception without touching Python beyond allocating it.
+///
+/// The issues stay on the Rust side until something reads them, so the raise
+/// path costs one object instead of a list, an object per issue, and four
+/// attribute writes.
+/// The exception class, looked up once per interpreter.
+///
+/// Resolved lazily rather than at module init: `seam/__init__.py` imports this
+/// extension, so reaching back for it eagerly would be a cycle.
+///
+/// `PyOnceLock` rather than a plain `OnceLock`: a cached Python object belongs
+/// to the interpreter that created it, and this one keys on that instead of
+/// handing a stale type to a subinterpreter.
+static VALIDATION_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
-    let err = ValidationError::new_err(summary);
-    // Attaching the structured issues is best effort: if it fails the caller
-    // still gets a correct exception, just without the extra attributes.
-    let list = PyList::empty(py);
-    for issue in &issues {
-        let _ = list.append(issue.clone());
+fn error_type<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyType>> {
+    let cls = VALIDATION_ERROR.get_or_try_init(py, || {
+        py.import("seam")?
+            .getattr("ValidationError")?
+            .cast_into::<PyType>()
+            .map(Bound::unbind)
+            .map_err(PyErr::from)
+    })?;
+    Ok(cls.bind(py).clone())
+}
+
+fn raise(py: Python<'_>, issues: Vec<seam_core::Issue>) -> PyErr {
+    let raw = match Py::new(py, Issues { inner: issues }) {
+        Ok(raw) => raw,
+        // Allocation failed, so the interpreter is in trouble; that error still
+        // has to surface as something.
+        Err(e) => return e,
+    };
+    match error_type(py) {
+        // `from_type` stores the class and its argument without instantiating,
+        // so even the exception object waits until something needs it.
+        Ok(cls) => PyErr::from_type(cls, (raw,)),
+        Err(e) => e,
     }
-    let value = err.value(py);
-    let _ = value.setattr("issues", list);
-    if let Some(first) = issues.first() {
-        let _ = value.setattr("path", &first.path);
-        let _ = value.setattr("code", &first.code);
-        let _ = value.setattr("message", &first.message);
-    }
-    err
+}
+
+/// A single issue at a top-level key, for the failures the engine does not
+/// produce itself.
+fn one_issue(key: &str, code: Code, message: String) -> Vec<seam_core::Issue> {
+    vec![seam_core::Issue {
+        path: seam_core::Path(vec![seam_core::Segment::Key(key.to_string())]),
+        code,
+        message,
+    }]
 }
 
 /// Everything resolved once when a validator is bound.
@@ -719,7 +807,7 @@ fn _seam(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Validator>()?;
     m.add_class::<Issue>()?;
     m.add_class::<Limits>()?;
-    m.add("ValidationError", py.get_type::<ValidationError>())?;
+    m.add_class::<Issues>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;
     m.add("__version__", seam_core::VERSION)?;
     Ok(())
