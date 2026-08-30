@@ -49,7 +49,12 @@ _{upper} = _SCHEMA.validator("{name}")
 
 
 def validate_{snake}(payload: object) -> {name}:
-    """Validate against `{name}` in {schema_file}."""
+    """Validate against `{name}` in {schema_file}.
+
+    Takes a dict, or raw JSON as `bytes` or `str`. Hand it the bytes when you
+    have them: Seam parses them itself, which is what keeps a 64-bit integer
+    intact on every runtime.
+    """
     return cast({name}, _{upper}(payload))
 
 '''

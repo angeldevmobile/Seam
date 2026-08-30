@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import pytest
@@ -271,3 +272,81 @@ def test_an_unknown_type_reports_as_an_issue(user):
     with pytest.raises(ValidationError) as excinfo:
         user.validator("Nope")
     assert excinfo.value.code == "unknown_type"
+
+
+# --- one call, dict or bytes ------------------------------------------------
+
+
+def test_bytes_and_dict_give_the_same_answer(user):
+    payload = {**base(), "signup_date": "2026-08-29", "tags": ["a", "b"]}
+    assert user.validate("User", payload) == user.validate(
+        "User", json.dumps(payload).encode()
+    )
+
+
+def test_str_is_accepted_too(user):
+    payload = {**base()}
+    assert user.validate("User", json.dumps(payload)) == user.validate("User", payload)
+
+
+def test_the_boundary_integer_survives_raw_json(user):
+    """Seam owns the parse, so the value never passes through a float.
+
+    Python's own json module happens to get this right, which is why the dict
+    path was already correct. JavaScript's does not, and that is why parsing
+    belongs here rather than in the host.
+    """
+    raw = b'{"id": 9007199254740993, "name": "Gabriel", "plan": "pro", "nickname": null}'
+    assert user.validate("User", raw)["id"] == 9007199254740993
+
+
+def test_an_integer_past_64_bits_is_reported_from_raw_json(user):
+    raw = b'{"id": 18446744073709551616, "name": "Gabriel", "plan": "pro", "nickname": null}'
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", raw)
+    assert excinfo.value.code == "integer_too_wide"
+
+
+def test_dates_are_normalised_from_raw_json(user):
+    raw = b'{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "signup_date": "2026-08-29", "last_seen": "2026-08-29T14:30:00Z"}'
+    out = user.validate("User", raw)
+    assert out["signup_date"] == dt.date(2026, 8, 29)
+    assert out["last_seen"].utcoffset() == dt.timedelta(0)
+
+
+def test_absence_survives_the_json_path(user):
+    raw = b'{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null}'
+    out = user.validate("User", raw)
+    assert "bio" not in out
+    assert out["nickname"] is None
+
+
+def test_validation_issues_come_through_from_raw_json(user):
+    raw = b'{"id": 1, "name": "ab", "plan": "platinum", "nickname": null}'
+    with pytest.raises(ValidationError) as excinfo:
+        user.validate("User", raw)
+    assert {(i.path, i.code) for i in excinfo.value.issues} == {
+        ("name", "too_short"),
+        ("plan", "not_in_enum"),
+    }
+
+
+def test_malformed_json_is_a_parse_error_with_a_position(user):
+    with pytest.raises(ParseError) as excinfo:
+        user.validate("User", b'{"id": }')
+    assert "1:8" in str(excinfo.value)
+
+
+def test_a_bound_validator_takes_bytes_too(user):
+    bound = user.validator("User")
+    raw = b'{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null}'
+    assert bound(raw) == bound(json.loads(raw))
+
+
+def test_limits_apply_while_parsing(user):
+    """A limit that only ran after parsing would already have paid for the
+    document it was supposed to refuse."""
+    tight = user.validator("User", Limits(max_items=2))
+    raw = b'{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "tags": ["a","b","c"]}'
+    with pytest.raises(ParseError):
+        tight(raw)

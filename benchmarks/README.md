@@ -14,21 +14,49 @@ own environment, and `--json` writes the raw samples.
 
 Median nanoseconds per validation of an already-parsed dict. Lower is better.
 
-| scenario | seam | msgspec | pydantic v2 |
-|---|---:|---:|---:|
-| flat, 6 fields | 1 866 | **345** | 1 626 |
-| nested + date | 3 770 | **502** | 2 708 |
-| array of 100 strings | 10 278 | **845** | 2 925 |
-| rejected payload | 2 447 | **954** | 1 974 |
+### From an already-parsed dict
 
-Relative to the fastest in each row:
+This isolates the validator, which is what the optimisation work below targets.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 5.4x | 1.00x | 4.7x |
-| nested + date | 7.5x | 1.00x | 5.4x |
-| array of 100 strings | 12.2x | 1.00x | 3.5x |
-| rejected payload | 2.6x | 1.00x | 2.1x |
+| flat, 6 fields | 2 355 | **341** | 1 666 |
+| nested + date | 3 729 | **500** | 2 735 |
+| array of 100 strings | 9 780 | **795** | 2 911 |
+| rejected payload | 2 351 | **940** | 1 967 |
+
+| scenario | seam | msgspec | pydantic v2 |
+|---|---:|---:|---:|
+| flat, 6 fields | 6.9x | 1.00x | 4.9x |
+| nested + date | 7.5x | 1.00x | 5.5x |
+| array of 100 strings | 12.3x | 1.00x | 3.7x |
+| rejected payload | 2.5x | 1.00x | 2.1x |
+
+### From raw JSON bytes, as a request actually arrives
+
+All three parse and validate in one call. This is the table to quote when
+someone asks how fast Seam is.
+
+| scenario | seam | msgspec | pydantic v2 |
+|---|---:|---:|---:|
+| flat, 6 fields | 1 924 | **421** | 1 589 |
+| nested + date | 3 660 | **657** | 2 559 |
+| array of 100 strings | 13 748 | **3 685** | 5 566 |
+
+| scenario | seam | msgspec | pydantic v2 |
+|---|---:|---:|---:|
+| flat, 6 fields | 4.6x | 1.00x | 3.8x |
+| nested + date | 5.6x | 1.00x | 3.9x |
+| array of 100 strings | 3.7x | 1.00x | 1.5x |
+
+Seam is now *faster from bytes than from a dict*, the same shape pydantic has,
+because parsing straight into the result skips building a dict nobody asked for.
+
+Before Seam owned the parse, this table read 4 668, 7 069 and 15 685 ns, or
+2.8-3.0x pydantic. The flat row is now within 1.2x of it.
+
+The array row barely moved and is the one left: its cost is emitting a hundred
+Python strings, which no parser change reaches.
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
@@ -51,9 +79,9 @@ other in one process, alternating rounds so drift lands on both.
 
 ## What is measured
 
-Validation of a Python dict that has already been parsed. JSON parsing is out
-of scope on purpose: it is a different question, and including it would let a
-library win on its parser rather than its validator.
+Two things, reported separately because they answer different questions. The
+first isolates the validator. The second is what a service holds when a request
+lands, and it is the one to quote when someone asks how fast Seam is.
 
 All three are asked to do the same work, as closely as they allow:
 
@@ -200,6 +228,26 @@ the second cheapest. The spread is explained by the work each type needs — `st
 has to be decoded — and not by how many checks preceded it, so each check must
 cost very little. Reordering would buy nothing, and the idea is dropped rather
 than implemented on the strength of how plausible it sounded.
+
+## Why Seam parses, which is not about speed
+
+The main README's headline example is `JSON.parse` corrupting
+`9007199254740993` into `...992`. If a binding is handed host objects that have
+already been parsed, **the corruption happened before Seam saw anything**, and
+validating a `number` whose bits are already gone accomplishes nothing.
+
+Python got away with it: `json.loads` uses arbitrary-precision integers, so the
+dict path was already correct. That was the language being generous, not a
+design decision, and JavaScript is not generous.
+
+So parsing is a correctness requirement for the second binding, and the speed it
+happens to buy is a side effect. `seam-core/src/json.rs` is hand-written and adds
+no dependency: the crate is loaded into three runtimes, the rules that keep an
+integer intact have to run while the bytes are read, and a general-purpose JSON
+crate would rebuild the intermediate tree the `Input` trait exists to avoid.
+
+It parses in order to validate. There is no encoder, which is what keeps the
+main README's "no general-purpose serialization" line true.
 
 ## Caveats
 

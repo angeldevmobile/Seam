@@ -34,13 +34,6 @@ pub fn validate<I: Input>(
     }
 }
 
-/// A step of the path, borrowed from the schema.
-///
-/// The old shape owned its keys, which meant cloning a field name into a
-/// `String` for every field of every payload just so a path would be ready if
-/// something went wrong. On a valid payload nothing ever read them. Borrowing
-/// costs nothing on the happy path and materialises only when an issue is
-/// actually recorded.
 enum Step<'a> {
     Key(&'a str),
     Index(usize),
@@ -71,8 +64,6 @@ impl<'a> Validator<'a> {
         self.issues.push(Issue { path, code, message });
     }
 
-    /// Records an issue one step below the current path, for a key that came
-    /// from the payload rather than the schema and so cannot be borrowed.
     fn push_under(&mut self, key: String, code: Code, message: String) {
         let mut path = self.here();
         path.0.push(Segment::Key(key));

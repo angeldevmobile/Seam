@@ -11,6 +11,9 @@ pub enum Value {
     String(String),
     Array(Vec<Value>),
     Object(BTreeMap<String, Value>),
+    /// An integer too wide for `Int`, kept as a fact so validation can report
+    /// it at its own path instead of the parse failing the whole document.
+    IntTooWide,
 }
 
 /// An integer that has not been through a float. Keeping the source signedness
@@ -68,20 +71,6 @@ impl<'a> Slot<&'a Value> {
     }
 }
 
-impl Value {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Value::Null => "null",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "integer",
-            Value::Float(_) => "float",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
-        }
-    }
-}
-
 impl crate::input::Input for Value {
     type Child<'a> = &'a Value;
 
@@ -94,6 +83,7 @@ impl crate::input::Input for Value {
             Value::String(_) => Kind::String,
             Value::Array(_) => Kind::Array,
             Value::Object(_) => Kind::Object,
+            Value::IntTooWide => Kind::IntegerTooWide,
         }
     }
 

@@ -6,7 +6,9 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple, PyType};
+use pyo3::types::{
+    PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple, PyType,
+};
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -14,7 +16,7 @@ use std::sync::Arc;
 
 use seam_core::input::{Input, Kind};
 use seam_core::schema::{ObjectType, Rule, Type};
-use seam_core::value::{Int, Slot};
+use seam_core::value::{Int, Slot, Value};
 use seam_core::Code;
 
 create_exception!(_seam, ParseError, PyException);
@@ -288,6 +290,24 @@ impl Validator {
     fn run<'py>(&self, payload: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = payload.py();
 
+        // Raw JSON is parsed here rather than by the host, because the rules
+        // that keep an integer intact have to apply while the bytes are read.
+        // A caller never has to know that.
+        //
+        // Checked by type, not by whether the value happens to extract: a list
+        // of small integers extracts as `Vec<u8>` perfectly well.
+        if let Ok(b) = payload.cast::<PyBytes>() {
+            return self.run_json(py, b.as_bytes());
+        }
+        if let Ok(b) = payload.cast::<PyByteArray>() {
+            // Mutable, so read a copy rather than borrow into it.
+            return self.run_json(py, &b.to_vec());
+        }
+        if payload.is_instance_of::<PyString>() {
+            let text = payload.extract::<String>()?;
+            return self.run_json(py, text.as_bytes());
+        }
+
         let Some(object_type) = self.schema.get(&self.type_name) else {
             return Err(raise(
                 py,
@@ -308,6 +328,29 @@ impl Validator {
         }
 
         Out { py, schema: &self.schema, bindings: &self.bindings }.object(object_type, payload)
+    }
+
+    fn run_json<'py>(&self, py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let value = seam_core::json::parse(bytes, self.limits)
+            .map_err(|e| ParseError::new_err(e.to_string()))?;
+
+        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &value, self.limits) {
+            return Err(raise(py, e.issues));
+        }
+
+        let Some(object_type) = self.schema.get(&self.type_name) else {
+            return Err(raise(
+                py,
+                one_issue(
+                    &self.type_name,
+                    Code::UnknownType,
+                    format!("schema declares no type named `{}`", self.type_name),
+                ),
+            ));
+        };
+
+        Out { py, schema: &self.schema, bindings: &self.bindings }
+            .object_from_value(object_type, &value)
     }
 }
 
@@ -752,6 +795,91 @@ impl<'py> Out<'_, 'py> {
         }
         let s: String = ob.extract()?;
         datetime_cls.call_method1("fromisoformat", (python_iso(&s),))
+    }
+}
+
+impl<'py> Out<'_, 'py> {
+    fn object_from_value(&self, ty: &ObjectType, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+        let out = PyDict::new(self.py);
+        let Value::Object(map) = v else {
+            return Ok(out.into_any());
+        };
+        for field in &ty.fields {
+            // Absent stays absent, the same as on the dict path.
+            if let Some(found) = map.get(&field.name) {
+                let value = self.emit(&field.ty, found)?;
+                match self.bindings.key(self.py, &field.name) {
+                    Some(key) => out.set_item(key, value)?,
+                    None => out.set_item(&field.name, value)?,
+                }
+            }
+        }
+        if !ty.deny_unknown_fields {
+            for (k, extra) in map {
+                if ty.field(k).is_none() {
+                    out.set_item(k, self.plain(extra)?)?;
+                }
+            }
+        }
+        Ok(out.into_any())
+    }
+
+    fn emit(&self, ty: &Type, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+        if matches!(v, Value::Null) {
+            return Ok(self.py.None().into_bound(self.py));
+        }
+        match (ty, v) {
+            (Type::Date, Value::String(s)) => self
+                .bindings
+                .date
+                .bind(self.py)
+                .call_method1("fromisoformat", (s,)),
+            (Type::DateTime, Value::String(s)) => self
+                .bindings
+                .datetime
+                .bind(self.py)
+                .call_method1("fromisoformat", (python_iso(s),)),
+            (Type::Array { item, .. }, Value::Array(items)) => {
+                let list = PyList::empty(self.py);
+                for each in items {
+                    list.append(self.emit(item, each)?)?;
+                }
+                Ok(list.into_any())
+            }
+            (Type::Object(obj), _) => self.object_from_value(obj, v),
+            (Type::Ref(name), _) => match self.schema.get(name) {
+                Some(obj) => self.object_from_value(obj, v),
+                None => self.plain(v),
+            },
+            _ => self.plain(v),
+        }
+    }
+
+    fn plain(&self, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+        Ok(match v {
+            Value::Null => self.py.None().into_bound(self.py),
+            Value::Bool(b) => b.into_pyobject(self.py)?.to_owned().into_any(),
+            Value::Int(Int::Signed(n)) => n.into_pyobject(self.py)?.into_any(),
+            Value::Int(Int::Unsigned(n)) => n.into_pyobject(self.py)?.into_any(),
+            Value::Float(f) => f.into_pyobject(self.py)?.into_any(),
+            Value::String(s) => s.into_pyobject(self.py)?.into_any(),
+            Value::Array(items) => {
+                let list = PyList::empty(self.py);
+                for each in items {
+                    list.append(self.plain(each)?)?;
+                }
+                list.into_any()
+            }
+            Value::Object(map) => {
+                let d = PyDict::new(self.py);
+                for (k, each) in map {
+                    d.set_item(k, self.plain(each)?)?;
+                }
+                d.into_any()
+            }
+            // Validation rejects this before the result is built.
+            Value::IntTooWide => self.py.None().into_bound(self.py),
+        })
     }
 }
 

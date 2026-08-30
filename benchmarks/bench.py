@@ -10,9 +10,16 @@ the same data as a file. A number without its methodology is not a measurement.
 
 What is being measured
 ----------------------
-Validation of an already-parsed Python dict. JSON parsing is deliberately out
-of scope: it is a different question, and including it would let a library win
-on its parser rather than its validator.
+Two tables.
+
+The first validates an already-parsed Python dict. That isolates the validator,
+which is what most of this file's optimisation work targets.
+
+The second starts from raw JSON bytes, which is what a service actually holds.
+It matters because msgspec and pydantic both fuse parsing into validation and
+never build the intermediate dict at all, while Seam has no such path: it needs
+`json.loads` first. Reporting only the first table would quietly hide an
+architectural gap behind a favourable measurement.
 
 What each library is asked to do
 --------------------------------
@@ -161,6 +168,10 @@ def invalid() -> dict[str, Any]:
     return {**flat(), "plan": "platinum"}
 
 
+def as_json(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload).encode()
+
+
 # ------------------------------------------------------------------ scenarios
 
 
@@ -202,6 +213,40 @@ def scenarios() -> dict[str, dict[str, tuple[Callable[[Any], Any], Any]]]:
     }
 
 
+def json_scenarios() -> dict[str, dict[str, tuple[Callable[[Any], Any], Any]]]:
+    """From raw bytes, the way a request arrives.
+
+    All three parse and validate in one call now; none of them builds an
+    intermediate dict the caller asked for.
+    """
+    return {
+        "json flat": {
+            "seam": (_seam_user, as_json(flat())),
+            "msgspec": (
+                lambda b: msgspec.json.decode(b, type=MsUser),
+                as_json(flat()),
+            ),
+            "pydantic": (PyUser.model_validate_json, as_json(flat())),
+        },
+        "json nested": {
+            "seam": (_seam_nested, as_json(nested())),
+            "msgspec": (
+                lambda b: msgspec.json.decode(b, type=MsUserNested),
+                as_json(nested()),
+            ),
+            "pydantic": (PyUserNested.model_validate_json, as_json(nested())),
+        },
+        "json array of 100": {
+            "seam": (_seam_arrays, as_json(arrays(100))),
+            "msgspec": (
+                lambda b: msgspec.json.decode(b, type=MsUserArrays),
+                as_json(arrays(100)),
+            ),
+            "pydantic": (PyUserArrays.model_validate_json, as_json(arrays(100))),
+        },
+    }
+
+
 # -------------------------------------------------------------------- timing
 
 
@@ -237,7 +282,7 @@ def check_equivalent() -> list[str]:
     """A benchmark of three libraries doing different work is worthless, so
     confirm each actually accepts the valid payloads and rejects the bad one."""
     problems = []
-    for name, entries in scenarios().items():
+    for name, entries in {**scenarios(), **json_scenarios()}.items():
         if name == "rejected":
             for lib, (fn, payload) in entries.items():
                 if fn(payload) is not None:
@@ -293,23 +338,29 @@ def main() -> int:
     results: dict[str, dict[str, dict[str, float]]] = {}
     libs = ["seam", "msgspec", "pydantic"]
 
-    header = f"{'scenario':<16}" + "".join(f"{lib:>14}" for lib in libs)
-    print(header)
-    print("-" * len(header))
+    header = f"{'scenario':<20}" + "".join(f"{lib:>14}" for lib in libs)
 
-    for name, entries in scenarios().items():
-        row = {}
-        for lib in libs:
-            fn, payload = entries[lib]
-            samples = measure(fn, payload, args.repeats, args.target_ms)
-            row[lib] = {
-                "median_ns": statistics.median(samples),
-                "min_ns": min(samples),
-                "stdev_ns": statistics.stdev(samples) if len(samples) > 1 else 0.0,
-            }
-        results[name] = row
-        cells = "".join(f"{row[lib]['median_ns']:>13.0f} " for lib in libs)
-        print(f"{name:<16}{cells}")
+    def run_group(title: str, group) -> None:
+        print()
+        print(title)
+        print(header)
+        print("-" * len(header))
+        for name, entries in group.items():
+            row = {}
+            for lib in libs:
+                fn, payload = entries[lib]
+                samples = measure(fn, payload, args.repeats, args.target_ms)
+                row[lib] = {
+                    "median_ns": statistics.median(samples),
+                    "min_ns": min(samples),
+                    "stdev_ns": statistics.stdev(samples) if len(samples) > 1 else 0.0,
+                }
+            results[name] = row
+            cells = "".join(f"{row[lib]['median_ns']:>13.0f} " for lib in libs)
+            print(f"{name:<20}{cells}")
+
+    run_group("From an already-parsed dict:", scenarios())
+    run_group("From raw JSON bytes, as a request arrives:", json_scenarios())
 
     fastest = min(libs, key=lambda l: results["flat"][l]["median_ns"])
     print(f"\nRelative to {fastest} (1.00 = fastest in that row):\n")
