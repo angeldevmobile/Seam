@@ -38,7 +38,8 @@ struct Validator<'a> {
 
 impl Validator<'_> {
     fn push(&mut self, code: Code, message: String) {
-        self.issues.push(Issue { path: Path(self.path.clone()), code, message });
+        self.issues
+            .push(Issue { path: Path(self.path.clone()), code, message });
     }
 
     fn within<F: FnOnce(&mut Self)>(&mut self, seg: Segment, f: F) {
@@ -439,7 +440,10 @@ mod tests {
     fn errors_carry_the_path_into_arrays() {
         let v = with(
             "tags",
-            Value::Array(vec![Value::String("ok".into()), Value::Int(Int::from(7_i64))]),
+            Value::Array(vec![
+                Value::String("ok".into()),
+                Value::Int(Int::from(7_i64)),
+            ]),
         );
         assert_eq!(codes(&v), vec![("tags[1]".into(), Code::TypeMismatch)]);
     }
@@ -490,8 +494,6 @@ mod tests {
         let limits = Limits { max_items: 2, ..Limits::DEFAULT };
         let v = with("tags", Value::Array(vec![Value::String("a".into()); 5]));
         let err = validate(&user_schema(), "User", &v, limits);
-        assert!(
-            matches!(err, Err(ref e) if e.issues.iter().any(|i| i.code == Code::SizeExceeded))
-        );
+        assert!(matches!(err, Err(ref e) if e.issues.iter().any(|i| i.code == Code::SizeExceeded)));
     }
 }

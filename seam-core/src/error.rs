@@ -115,7 +115,13 @@ pub struct Issue {
 
 impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {} ({})", self.path.render(), self.message, self.code)
+        write!(
+            f,
+            "{}: {} ({})",
+            self.path.render(),
+            self.message,
+            self.code
+        )
     }
 }
 

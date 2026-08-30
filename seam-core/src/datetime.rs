@@ -134,7 +134,10 @@ mod tests {
     fn lenient_date_spellings_are_rejected() {
         assert_eq!(validate_date("2026-8-29"), Err(Code::InvalidDate));
         assert_eq!(validate_date("2026/08/29"), Err(Code::InvalidDate));
-        assert_eq!(validate_date("2026-08-29T00:00:00Z"), Err(Code::InvalidDate));
+        assert_eq!(
+            validate_date("2026-08-29T00:00:00Z"),
+            Err(Code::InvalidDate)
+        );
         assert_eq!(validate_date(""), Err(Code::InvalidDate));
     }
 
