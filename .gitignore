@@ -1,4 +1,4 @@
-/target
+target/
 **/*.rs.bk
 
 # Cargo.lock is committed on purpose. The old advice was to ignore it in

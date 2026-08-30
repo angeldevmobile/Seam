@@ -43,3 +43,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo metadata --locked --format-version 1 > /dev/null
+
+  # seam-py is outside the workspace, so it needs its own lint pass.
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-py
+      - run: cargo fmt --all --check --manifest-path seam-py/Cargo.toml
+      - run: cargo clippy --manifest-path seam-py/Cargo.toml --all-targets -- -D warnings
+
+  # 3.9 and 3.13 on every platform: the wheel is abi3, so one build per
+  # platform has to work across the whole range. Testing only the newest
+  # would leave that claim unchecked.
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-py
+      - run: pip install ./seam-py pytest
+      - run: pytest seam-py/tests -q

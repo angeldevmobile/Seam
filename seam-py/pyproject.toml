@@ -6,15 +6,26 @@ build-backend = "maturin"
 name = "seam"
 requires-python = ">=3.9"
 description = "One schema. Every language. No drift."
+readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Typing :: Typed",
 ]
 dynamic = ["version"]
 
+[project.urls]
+Repository = "https://github.com/angeldevmobile/Seam"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
 [tool.maturin]
 module-name = "seam._seam"
 python-source = "python"
 features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
