@@ -1,0 +1,36 @@
+{
+  "name": "seam-wasm",
+  "version": "0.0.0",
+  "description": "One schema. Every language. No drift. The browser build.",
+  "license": "MIT OR Apache-2.0",
+  "repository": "https://github.com/angeldevmobile/Seam",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "cargo build --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir wasm --out-name seam_wasm target/wasm32-unknown-unknown/release/seam_wasm.wasm",
+    "size": "node scripts/size.mjs",
+    "test": "node --test __test__/binding.test.mjs __test__/conformance.test.mjs __test__/browser.test.mjs"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "wasm/seam_wasm.js",
+    "wasm/seam_wasm.d.ts",
+    "wasm/seam_wasm_bg.wasm"
+  ],
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

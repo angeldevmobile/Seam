@@ -3,7 +3,7 @@
 **One schema. Every language. No drift.**
 
 Seam is a cross-language data contract: you write the schema once in a `.seam` file, and
-Python and Node — with the browser and the JVM to come — all validate against the *same compiled
+Python, Node and the browser — with the JVM to come — all validate against the *same compiled
 engine*, with the same rules, the same errors, and the same answers on the cases that usually
 break.
 
@@ -123,8 +123,21 @@ user.id;      // bigint
 user.bio;     // string | undefined -- absent is a different state from null
 ```
 
-Same file. Same engine. Same verdict. The conformance suite runs from Rust, Python and Node
-against those same case files, in CI, so "same verdict" is a test rather than a promise.
+```javascript
+// In the browser. Same engine, compiled to WebAssembly.
+import { Schema } from "seam-wasm";
+
+const schema = await Schema.parse(await (await fetch("/contracts/user.seam")).text());
+const user = schema.validator("User").validate(await res.arrayBuffer());   // not res.json()
+```
+
+The browser build takes bytes and **refuses an already-parsed object**. By the time
+`JSON.parse` has run the `u64` above is already the wrong number, so accepting one would offer,
+in the runtime where the problem is worst, the exact path Seam exists to avoid.
+
+Same file. Same engine. Same verdict. The conformance suite runs from Rust, Python, Node and
+WebAssembly against those same case files, in CI, so "same verdict" is a test rather than a
+promise.
 
 ### Absence and nullability are orthogonal
 
@@ -310,8 +323,10 @@ real `Error` subclass with a real stack, `undefined` read as absence, generated 
 interfaces, and the conformance suite running from Node against the same files as Rust and
 Python. This is the phase that made the thesis demonstrable rather than merely argued.
 
-**Phase 3: WebAssembly.** Browser-side validation via `wasm-bindgen`, so a frontend enforces
-the same contract as the service it calls.
+**Phase 3: WebAssembly.** *Done.* Browser-side validation via `wasm-bindgen`, so a frontend
+enforces the same contract as the service it calls: 56 KiB brotli, `bigint` for 64-bit integers,
+and the same conformance suite as the other three. It takes bytes and refuses an already-parsed
+object, because `JSON.parse` has already corrupted the value by then.
 
 **Phase 4: Expanded types.** Tagged unions are *done*: a `union` with a mandatory `@tag`,
 discriminated unions in TypeScript and tag-pinned `TypedDict`s in Python, both narrowing on the
@@ -344,7 +359,7 @@ seam/
 │   └── validate.rs       #   one walk, generic over the input
 ├── seam-py/              # PyO3 binding, abi3 wheels for 3.9+
 ├── seam-js/              # napi-rs binding, bigint for 64-bit integers
-├── seam-wasm/            # wasm-bindgen binding (phase 3, not built yet)
+├── seam-wasm/            # wasm-bindgen binding, browser, bytes only
 └── seam-jvm/             # Panama binding       (phase 5, not built yet)
 ```
 

@@ -202,7 +202,36 @@ checker narrow on it: `if (e.type === 'created')` in TypeScript and
 `if event["type"] == "created"` in Python each make the rest of the value the
 created variant, checked statically.
 
-## 8. Errors
+## 8. What a binding may accept
+
+A binding must take **raw JSON bytes**. Everything in this document about
+integers depends on it: a binding handed values its host's parser has already
+produced cannot keep §2, because `JSON.parse` has corrupted anything past 2⁵³
+before validation begins.
+
+A binding **may** also take its host's own values, and the Rust, Python and
+Node bindings do — a Python `dict` and a JavaScript object are useful inputs
+where the payload was built in-process rather than received. Such a path must
+report `unsafe_integer` rather than validate a number the host already holds
+inexactly.
+
+**A binding may refuse that second path entirely.** The WebAssembly binding
+does: in a browser an already-parsed object has come through `JSON.parse` in
+essentially every case, so accepting one would offer the corrupting path in the
+runtime where it is most likely to be taken. Refusing is conformant. Accepting
+without reporting `unsafe_integer` is not.
+
+Two further allowances, both for hosts rather than for rules:
+
+- A binding may compile asynchronously where the host requires it. WebAssembly
+  of any size cannot be instantiated synchronously on a browser's main thread,
+  so `Schema.parse` returns a promise there and is synchronous elsewhere.
+- A binding need not offer loading a schema from a path where the host has no
+  filesystem.
+
+Neither changes a verdict, which is the only thing this document fixes.
+
+## 9. Errors
 
 `path` and `code` are stable API. `message` is for humans and may be reworded in
 any release.
@@ -221,7 +250,7 @@ Codes: `required`, `null_not_allowed`, `type_mismatch`, `out_of_range`,
 Adding a code is a minor change. Renaming one, removing one, or changing which
 condition produces one is breaking.
 
-## 8. Limits
+## 10. Limits
 
 Enforced in the core so bindings inherit them.
 

@@ -85,6 +85,50 @@ jobs:
       - run: npm test
         working-directory: seam-js
 
+  # seam-wasm is outside the workspace, so it needs its own lint pass. Linted
+  # for wasm32 rather than the host: that is the only target it is ever built
+  # for, and a lint against a target nothing ships would be checking nothing.
+  wasm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-wasm
+      - run: cargo fmt --all --check --manifest-path seam-wasm/Cargo.toml
+      - run: cargo clippy --manifest-path seam-wasm/Cargo.toml --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+  # The browser binding runs the same conformance cases as the other three.
+  # The suite runs under Node against the same `.wasm` a browser gets, because
+  # a browser in the critical path buys flakiness rather than coverage; a
+  # separate smoke test then drives a real Chromium, which is the one thing
+  # Node cannot check.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-wasm
+      # Pinned to the crate version in Cargo.lock: wasm-bindgen refuses to run
+      # when the CLI and the crate disagree, and the message is obscure.
+      - run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+      - run: npm ci
+        working-directory: seam-wasm
+      - run: npm run build
+        working-directory: seam-wasm
+      - run: npx playwright install --with-deps chromium
+        working-directory: seam-wasm
+      - run: npm test
+        working-directory: seam-wasm
+      - run: npm run size
+        working-directory: seam-wasm
+
   # seam-py is outside the workspace, so it needs its own lint pass.
   python-lint:
     runs-on: ubuntu-latest

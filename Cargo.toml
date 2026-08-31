@@ -4,7 +4,7 @@ members = ["seam-core"]
 
 # seam-py builds standalone via maturin and pulls pyo3, so it stays out of the
 # default build until Phase 1 core is frozen. Move it into `members` then.
-exclude = ["seam-py", "seam-js"]
+exclude = ["seam-py", "seam-js", "seam-wasm"]
 
 [workspace.package]
 version = "0.0.0"
