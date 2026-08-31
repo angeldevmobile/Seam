@@ -238,10 +238,15 @@ would otherwise corrupt that integer with `JSON.parse` while merely loading the 
 "No drift" stops being a slogan the moment it becomes a test that can fail. That suite is the
 real deliverable, and it is what survives even if someone reimplements the engine.
 
-Today it is 68 cases over three schemas, asserting 16 of the spec's 20 error codes, run by three
+Today it is 75 cases over three schemas, asserting 18 of the spec's 20 error codes, run by four
 runners on three operating systems. [`conformance/README.md`](conformance/README.md) lists the
-four codes it does not reach and why, because an uncovered code should be a known gap rather
+two codes it does not reach and why, because an uncovered code should be a known gap rather
 than an oversight.
+
+Two of those runners feed the binding host objects and two feed it bytes, which is how the suite
+caught the one place the two paths disagreed: a limit was a parse error on one and a coded issue
+on the other, so a service handling `size_exceeded` would have missed it on the path this
+project recommends.
 
 ## Fast, and here is what that means
 
@@ -422,7 +427,8 @@ Early development, and not yet published to crates.io or PyPI. Phase 1 is done.
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a
 `number` would lie, and generated TypeScript interfaces. Both take a dict or object, or raw JSON, in one call, normalise values on
 the way out, and build nothing for an error until something reads it. The conformance suite runs
-from Rust, Python and Node against the same 68 cases, in CI, on three operating systems.
+from Rust, Python, Node and WebAssembly against the same 75 cases, in CI, on three operating
+systems.
 
 **What is honest about it.** Custom validators, string formats and framework integration do not
 exist. If you work in a single language today, pydantic or msgspec is the

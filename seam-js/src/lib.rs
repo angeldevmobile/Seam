@@ -138,19 +138,20 @@ impl Validator {
 
     #[napi]
     pub fn validate<'env>(&self, env: &'env Env, payload: Unknown<'env>) -> Result<Object<'env>> {
-        // Raw JSON is read by Seam rather than by the host: `JSON.parse` would
-        // already have flattened a 64-bit integer into a double, and nothing
-        // afterwards brings those bits back.
         if let Some(bytes) = as_json_bytes(&payload)? {
-            let doc = seam_core::json::Document::parse(&bytes, self.limits)
-                .map_err(|e| Error::new(Status::InvalidArg, e.to_string()))?;
+            let doc = match seam_core::json::Document::parse(&bytes, self.limits) {
+                Ok(doc) => doc,
+                Err(e) => {
+                    return match e.as_validation() {
+                        Some(v) => refused(env, v),
+                        None => Err(Error::new(Status::InvalidArg, e.to_string())),
+                    }
+                }
+            };
             let root = doc.root();
             return match seam_core::validate(&self.schema, &self.type_name, &root, self.limits) {
                 Err(e) => refused(env, e),
                 Ok(()) => {
-                    // Resolved after validating, never before: for a union the
-                    // shape is whatever the tag turned out to say, and only a
-                    // payload that validated has a tag worth reading.
                     let (ty, tag) = self.shape(&root)?;
                     let value = emit_json(env, &self.schema, ty, &root, tag)?;
                     accepted(env, value.to_unknown())
@@ -182,11 +183,6 @@ impl Validator {
     }
 }
 
-/// What a validation produced: the value, or the reasons it was refused.
-///
-/// The idiomatic surface lives in `index.js`, which turns this into a returned
-/// value or a thrown `SeamValidationError`. Deciding on the JavaScript side is
-/// what makes the error a real `Error` with a real stack.
 fn accepted<'env>(env: &'env Env, value: Unknown<'env>) -> Result<Object<'env>> {
     let mut out = Object::new(env)?;
     out.set("ok", true)?;
@@ -226,7 +222,7 @@ fn as_json_bytes(value: &Unknown<'_>) -> Result<Option<Vec<u8>>> {
     }
 }
 
-// --------------------------------------------------------- describing
+//   describing
 
 fn describe_object<'env>(env: &'env Env, ty: &ObjectType) -> Result<Object<'env>> {
     let mut fields = env.create_array(ty.fields.len() as u32)?;
@@ -242,13 +238,9 @@ fn describe_object<'env>(env: &'env Env, ty: &ObjectType) -> Result<Object<'env>
     }
 
     let mut out = Object::new(env)?;
-    // `kind` because objects and unions share one namespace: a generator
-    // reading this map has to know which of the two it is holding.
     out.set("kind", "object")?;
     out.set("name", ty.name.as_str())?;
     out.set("denyUnknownFields", ty.deny_unknown_fields)?;
-    // Declaration order, not sorted: it is the order errors are reported in,
-    // and the order the generated type should read in.
     out.set("fields", fields.coerce_to_object()?)?;
     Ok(out)
 }
@@ -276,8 +268,6 @@ fn describe_rules<'env>(env: &'env Env, rules: &[Rule]) -> Result<Object<'env>> 
     let mut out = env.create_array(rules.len() as u32)?;
     for (i, rule) in rules.iter().enumerate() {
         let mut r = Object::new(env)?;
-        // The rule names are the `.seam` spelling, so they stay snake_case:
-        // they are values from the schema language, not JavaScript keys.
         match rule {
             Rule::MinLen(n) => {
                 r.set("rule", "min_len")?;
@@ -297,8 +287,6 @@ fn describe_rules<'env>(env: &'env Env, rules: &[Rule]) -> Result<Object<'env>> 
             }
             Rule::Range { min, max } => {
                 r.set("rule", "range")?;
-                // A `u64` bound does not fit a `number`, and a bound that is
-                // not the bound would be worse than no bound at all.
                 r.set("min", BigInt::from(*min))?;
                 r.set("max", BigInt::from(*max))?;
             }
@@ -361,7 +349,7 @@ fn describe_type<'env>(env: &'env Env, ty: &Type) -> Result<Object<'env>> {
     Ok(out)
 }
 
-// ------------------------------------------------------------- reading JS
+//  ---- reading JS
 
 struct JsInput<'env> {
     env: &'env Env,
@@ -399,22 +387,18 @@ fn classify(value: &Unknown<'_>) -> Kind {
             }
             Kind::Int
         }
-        Ok(ValueType::Object) => {
-            match Object::from_unknown(*value) {
-                Ok(o) => {
-                    if o.is_array().unwrap_or(false) {
-                        Kind::Array
-                    } else if is_date(&o) {
-                        // A date reaches the engine in its wire form, so the
-                        // same rules apply as to the string JSON would carry.
-                        Kind::String
-                    } else {
-                        Kind::Object
-                    }
+        Ok(ValueType::Object) => match Object::from_unknown(*value) {
+            Ok(o) => {
+                if o.is_array().unwrap_or(false) {
+                    Kind::Array
+                } else if is_date(&o) {
+                    Kind::String
+                } else {
+                    Kind::Object
                 }
-                Err(_) => Kind::Foreign,
             }
-        }
+            Err(_) => Kind::Foreign,
+        },
         _ => Kind::Foreign,
     }
 }
@@ -426,8 +410,6 @@ fn is_date(o: &Object<'_>) -> bool {
 }
 
 impl<'env> Input for JsInput<'env> {
-    // Tied to the environment rather than to the borrow: a child outlives the
-    // call that produced it, which is what lets the emitter reuse it.
     type Child<'x>
         = JsInput<'env>
     where
@@ -544,14 +526,7 @@ impl<'env> Input for JsInput<'env> {
     }
 }
 
-// -------------------------------------------------------- resolving a shape
-
-/// The object a value is actually shaped like, and the tag key to carry over.
-///
-/// For a `schema` that is fixed. For a `union` it is whatever the payload's tag
-/// says, which is why this takes the input: a union has no shape until a value
-/// picks one. Returns `None` only for a payload that did not validate, since a
-/// validated one always names a variant.
+//   resolving a shape
 fn shape<'s, I: Input>(
     schema: &'s seam_core::Schema,
     name: &str,
@@ -571,7 +546,7 @@ fn shape<'s, I: Input>(
         .map(|obj| (obj, Some(u.tag.as_str())))
 }
 
-// -------------------------------------------------------------- writing JS
+//  ----- writing JS
 
 fn emit_js<'env>(
     env: &'env Env,
@@ -581,17 +556,12 @@ fn emit_js<'env>(
     tag: Option<&str>,
 ) -> Result<Object<'env>> {
     let mut out = Object::new(env)?;
-    // The tag belongs to the union rather than to the variant, so no field
-    // would copy it. Dropping it would hand back an object whose own
-    // discriminant is missing, which is not the value that was validated.
     if let Some(tag) = tag {
         if let Slot::Present(v) = input.slot(tag) {
             out.set(tag, v.value)?;
         }
     }
     for field in &ty.fields {
-        // Absent stays absent: the property is simply not created, which is
-        // what `"bio" in user` and `JSON.stringify` both read as not sent.
         let value = match input.slot(&field.name) {
             Slot::Absent => continue,
             Slot::Null => {

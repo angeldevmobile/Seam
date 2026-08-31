@@ -29,6 +29,23 @@ function load(name) {
   return schemas.get(name)
 }
 
+// The case files spell limits the way the spec does; this binding takes them
+// camelCased, so the one place they are translated is here.
+const LIMIT_KEYS = {
+  max_depth: 'maxDepth',
+  max_items: 'maxItems',
+  max_string_bytes: 'maxStringBytes',
+  max_object_keys: 'maxObjectKeys',
+}
+
+function limitsOf(c) {
+  const out = {}
+  for (const [from, to] of Object.entries(LIMIT_KEYS)) {
+    if (c.limits && c.limits[from] !== undefined) out[to] = c.limits[from]
+  }
+  return out
+}
+
 function collect() {
   const out = []
   for (const file of readdirSync(join(CONFORMANCE, 'cases')).sort()) {
@@ -40,7 +57,14 @@ function collect() {
       const payload = c.input_raw
         ? Buffer.from(c.input_raw)
         : Buffer.from(JSON.stringify({ ...base, ...(c.input ?? {}) }))
-      out.push({ name: `${file} :: ${c.name}`, schema: doc.schema, type: doc.type, payload, expect: c.expect })
+      out.push({
+        name: `${file} :: ${c.name}`,
+        schema: doc.schema,
+        type: doc.type,
+        payload,
+        expect: c.expect,
+        limits: limitsOf(c),
+      })
     }
   }
   return out
@@ -48,9 +72,9 @@ function collect() {
 
 const CASES = collect()
 
-function found(schemaName, typeName, payload) {
+function found(schemaName, typeName, payload, limits) {
   try {
-    load(schemaName).validate(typeName, payload)
+    load(schemaName).validate(typeName, payload, limits)
     return []
   } catch (e) {
     if (!(e instanceof SeamValidationError)) throw e
@@ -63,19 +87,33 @@ function expected(expect) {
   return (expect.issues ?? []).map((i) => `${i.path}:${i.code}`)
 }
 
+/** Which codes appeared, not where or how many times. */
+function codesOf(found) {
+  return [...new Set(found.map((s) => s.slice(s.lastIndexOf(':') + 1)))].sort()
+}
+
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 68, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 75, `collected only ${CASES.length}`)
 })
 
 for (const c of CASES) {
   test(c.name, () => {
-    assert.deepEqual(found(c.schema, c.type, c.payload), expected(c.expect))
+    const got = found(c.schema, c.type, c.payload, c.limits)
+    // A limit is caught while parsing, before the value it belongs to exists:
+    // a binding fed bytes stops at the first breach and has no path, while one
+    // fed host objects finishes the walk and reports each. Both must agree on
+    // the code, and the code is the stable API.
+    if (c.expect?.codes) {
+      assert.deepEqual(codesOf(got), [...c.expect.codes].sort())
+    } else {
+      assert.deepEqual(got, expected(c.expect))
+    }
   })
 }
 
 test('the harness detects a wrong expectation', () => {
   // A harness that cannot fail proves nothing.
   const valid = Buffer.from('{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null}')
-  assert.deepEqual(found('user', 'User', valid), [])
-  assert.notDeepEqual(found('user', 'User', valid), ['id:type_mismatch'])
+  assert.deepEqual(found('user', 'User', valid, {}), [])
+  assert.notDeepEqual(found('user', 'User', valid, {}), ['id:type_mismatch'])
 })

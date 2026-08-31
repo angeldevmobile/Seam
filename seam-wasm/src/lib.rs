@@ -118,9 +118,17 @@ impl Validator {
     /// `SeamValidationError`; deciding on the JavaScript side is what makes the
     /// error a real `Error` with a real stack.
     pub fn validate(&self, bytes: &[u8]) -> Result<Object, JsValue> {
+        // A limit is a verdict, not a syntax error: reported with the same code
+        // the other bindings' object path produces, so a caller handles it in
+        // one place regardless of which path the payload took.
         let doc = match seam_core::json::Document::parse(bytes, self.limits) {
             Ok(doc) => doc,
-            Err(e) => return Err(JsError::new(&e.to_string()).into()),
+            Err(e) => {
+                return match e.as_validation() {
+                    Some(v) => refused(v),
+                    None => Err(JsError::new(&e.to_string()).into()),
+                }
+            }
         };
         let root = doc.root();
 

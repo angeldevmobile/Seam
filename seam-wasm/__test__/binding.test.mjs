@@ -205,3 +205,14 @@ test('a validation failure is a real Error with every issue', () => {
   assert.equal(e.code, 'out_of_range')
   assert.match(e.message, /and 2 more/)
 })
+
+test('a limit is a verdict with a code, not a parse error', () => {
+  // This binding only has the bytes path, so the code is the whole of what a
+  // caller can act on. Reporting it as a parse error would have hidden it.
+  const tight = user.validator('User', { maxStringBytes: 4 })
+  const e = caught(() => tight.validate(Buffer.from(RAW)), SeamValidationError)
+  assert.deepEqual(
+    [...new Set(e.issues.map((i) => i.code))],
+    ['size_exceeded'],
+  )
+})

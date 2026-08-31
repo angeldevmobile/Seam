@@ -12,6 +12,7 @@
 
 use std::borrow::Cow;
 
+use crate::error::{Code, Issue, Path, ValidationError};
 use crate::input::{Input, Kind};
 use crate::limits::Limits;
 use crate::value::{Int, Slot};
@@ -21,6 +22,23 @@ pub struct JsonError {
     pub line: usize,
     pub column: usize,
     pub message: String,
+    /// Set when the document was refused for exceeding a limit rather than for
+    /// being malformed.
+    ///
+    /// The limits exist to stop a hostile document from being built at all, so
+    /// they are checked here rather than after parsing — which means there is
+    /// no path to report, only a position. The code is what a caller acts on,
+    /// and it is the same code the validator would have produced had the same
+    /// payload arrived as host objects.
+    pub code: Option<Code>,
+}
+
+impl JsonError {
+    pub fn as_validation(&self) -> Option<ValidationError> {
+        self.code.map(|code| ValidationError {
+            issues: vec![Issue { path: Path(Vec::new()), code, message: self.message.clone() }],
+        })
+    }
 }
 
 impl std::fmt::Display for JsonError {
@@ -74,6 +92,9 @@ impl<'a> Document<'a> {
                 line: 1,
                 column: 1,
                 message: "document larger than 4 GiB".to_string(),
+                // A limit like any other, and the one a caller is most likely
+                // to want to tell apart from malformed input.
+                code: Some(Code::SizeExceeded),
             });
         }
         if std::str::from_utf8(input).is_err() {
@@ -81,6 +102,8 @@ impl<'a> Document<'a> {
                 line: 1,
                 column: 1,
                 message: "input is not valid UTF-8".to_string(),
+                // Not a limit: this is not JSON at all.
+                code: None,
             });
         }
 
@@ -347,7 +370,12 @@ impl Parser<'_> {
                 column += 1;
             }
         }
-        JsonError { line, column, message: message.into() }
+        JsonError { line, column, message: message.into(), code: None }
+    }
+
+    /// The same, for a limit rather than a syntax error.
+    fn exceeded(&self, code: Code, message: impl Into<String>) -> JsonError {
+        JsonError { code: Some(code), ..self.error(message) }
     }
 
     fn push(&mut self, node: Node) -> u32 {
@@ -382,10 +410,10 @@ impl Parser<'_> {
 
     fn value(&mut self, depth: usize) -> Result<u32, JsonError> {
         if depth > self.limits.max_depth {
-            return Err(self.error(format!(
-                "nesting deeper than the limit of {}",
-                self.limits.max_depth
-            )));
+            return Err(self.exceeded(
+                Code::DepthExceeded,
+                format!("nesting deeper than the limit of {}", self.limits.max_depth),
+            ));
         }
         match self.peek() {
             Some(b'{') => self.object(depth),
@@ -443,10 +471,13 @@ impl Parser<'_> {
                 None => found.push(Member { key, node }),
             }
             if found.len() > self.limits.max_object_keys {
-                return Err(self.error(format!(
-                    "more than {} keys in one object",
-                    self.limits.max_object_keys
-                )));
+                return Err(self.exceeded(
+                    Code::SizeExceeded,
+                    format!(
+                        "more than {} keys in one object",
+                        self.limits.max_object_keys
+                    ),
+                ));
             }
 
             self.skip_ws();
@@ -475,10 +506,10 @@ impl Parser<'_> {
             self.skip_ws();
             found.push(self.value(depth + 1)?);
             if found.len() > self.limits.max_items {
-                return Err(self.error(format!(
-                    "more than {} items in one array",
-                    self.limits.max_items
-                )));
+                return Err(self.exceeded(
+                    Code::SizeExceeded,
+                    format!("more than {} items in one array", self.limits.max_items),
+                ));
             }
             self.skip_ws();
             match self.bump() {
@@ -504,10 +535,10 @@ impl Parser<'_> {
                 Some(b'"') => {
                     let len = (self.pos - 1 - start) as u32;
                     if len as usize > self.limits.max_string_bytes {
-                        return Err(self.error(format!(
-                            "string longer than {} bytes",
-                            self.limits.max_string_bytes
-                        )));
+                        return Err(self.exceeded(
+                            Code::SizeExceeded,
+                            format!("string longer than {} bytes", self.limits.max_string_bytes),
+                        ));
                     }
                     return Ok(Span { start: start as u32, len, escaped });
                 }

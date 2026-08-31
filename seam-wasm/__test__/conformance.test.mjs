@@ -33,6 +33,23 @@ async function load(name) {
   return schemas.get(name)
 }
 
+// The case files spell limits the way the spec does; this binding takes them
+// camelCased, so the one place they are translated is here.
+const LIMIT_KEYS = {
+  max_depth: 'maxDepth',
+  max_items: 'maxItems',
+  max_string_bytes: 'maxStringBytes',
+  max_object_keys: 'maxObjectKeys',
+}
+
+function limitsOf(c) {
+  const out = {}
+  for (const [from, to] of Object.entries(LIMIT_KEYS)) {
+    if (c.limits && c.limits[from] !== undefined) out[to] = c.limits[from]
+  }
+  return out
+}
+
 function collect() {
   const out = []
   for (const file of readdirSync(join(CONFORMANCE, 'cases')).sort()) {
@@ -50,6 +67,7 @@ function collect() {
         type: doc.type,
         payload,
         expect: c.expect,
+        limits: limitsOf(c),
       })
     }
   }
@@ -76,12 +94,24 @@ function found(validator, payload) {
 for (const c of CASES) {
   test(c.name, async () => {
     const schema = await load(c.schema)
-    assert.deepEqual(found(schema.validator(c.type), c.payload), expected(c.expect))
+    const got = found(schema.validator(c.type, c.limits), c.payload)
+    // A limit is caught while parsing, before the value it belongs to exists:
+    // a binding fed bytes stops at the first breach and has no path, while one
+    // fed host objects finishes the walk and reports each. Both must agree on
+    // the code, and the code is the stable API.
+    if (c.expect?.codes) {
+      assert.deepEqual(
+        [...new Set(got.map(([, code]) => code))].sort(),
+        [...c.expect.codes].sort(),
+      )
+    } else {
+      assert.deepEqual(got, expected(c.expect))
+    }
   })
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 68, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 75, `collected only ${CASES.length}`)
 })
 
 test('the harness detects a wrong expectation', async () => {

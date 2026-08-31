@@ -345,8 +345,35 @@ def test_a_bound_validator_takes_bytes_too(user):
 
 def test_limits_apply_while_parsing(user):
     """A limit that only ran after parsing would already have paid for the
-    document it was supposed to refuse."""
+    document it was supposed to refuse.
+
+    It is still reported as a ValidationError with the code the mapping spec
+    fixes, not as a parse error: a caller acting on `size_exceeded` has to find
+    it whichever path the payload took.
+    """
     tight = user.validator("User", Limits(max_items=2))
     raw = b'{"id": 1, "name": "Gabriel", "plan": "pro", "nickname": null, "tags": ["a","b","c"]}'
-    with pytest.raises(ParseError):
+    with pytest.raises(ValidationError) as excinfo:
         tight(raw)
+    assert [i.code for i in excinfo.value.issues] == ["size_exceeded"]
+
+
+def test_a_limit_is_the_same_code_on_both_paths(user):
+    """The path differs — parsing stops before the value exists — but the code
+    does not, which is the half a caller acts on."""
+    tight = user.validator("User", Limits(max_string_bytes=4))
+    payload = {"id": 1, "name": "Gabriel", "plan": "pro", "nickname": None}
+
+    def codes(p):
+        with pytest.raises(ValidationError) as excinfo:
+            tight(p)
+        return {i.code for i in excinfo.value.issues}
+
+    assert codes(json.dumps(payload).encode()) == {"size_exceeded"}
+    assert codes(payload) == {"size_exceeded"}
+
+
+def test_malformed_json_is_still_a_parse_error(user):
+    """A limit is a verdict about the data; broken syntax is not."""
+    with pytest.raises(ParseError):
+        user.validator("User")(b"{ nope")

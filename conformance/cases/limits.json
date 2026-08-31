@@ -1,0 +1,58 @@
+{
+  "schema": "order",
+  "type": "Order",
+  "base": {
+    "id": 1,
+    "lines": [{ "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } }],
+    "total": { "amount": 19.98, "currency": "USD" },
+    "coupon": null,
+    "placed": "2026-08-30T12:00:00Z"
+  },
+  "cases": [
+    {
+      "name": "the defaults accept an ordinary payload",
+      "expect": "valid"
+    },
+    {
+      "name": "nesting past max_depth is depth_exceeded",
+      "note": "Order > lines[] > Line > unit > Money is four levels, so a limit of two refuses it and a limit of four does not.",
+      "limits": { "max_depth": 2 },
+      "expect": { "codes": ["depth_exceeded"] }
+    },
+    {
+      "name": "a limit that the payload fits is not an error",
+      "limits": { "max_depth": 4 },
+      "expect": "valid"
+    },
+    {
+      "name": "a string past max_string_bytes is size_exceeded",
+      "limits": { "max_string_bytes": 2 },
+      "expect": { "codes": ["size_exceeded"] }
+    },
+    {
+      "name": "an object past max_object_keys is size_exceeded",
+      "note": "The root itself carries six keys.",
+      "limits": { "max_object_keys": 3 },
+      "expect": { "codes": ["size_exceeded"] }
+    },
+    {
+      "name": "an array past max_items is refused",
+      "note": "max_items is a limit on hostile input, distinct from @max_items on a field, which is a rule of the schema and reports too_many_items.",
+      "limits": { "max_items": 1 },
+      "input": {
+        "lines": [
+          { "sku": "A1", "qty": 2, "unit": { "amount": 9.99, "currency": "USD" } },
+          { "sku": "B2", "qty": 3, "unit": { "amount": 1.0, "currency": "EUR" } }
+        ]
+      },
+      "expect": { "codes": ["size_exceeded"] }
+    },
+    {
+      "name": "max_string_bytes counts bytes, not characters",
+      "note": "Four characters, but eight bytes in UTF-8, so a limit of four refuses it. The rule @max_len counts scalar values instead; the two measure different things on purpose.",
+      "limits": { "max_string_bytes": 4 },
+      "input": { "coupon": "éééé" },
+      "expect": { "codes": ["size_exceeded"] }
+    }
+  ]
+}

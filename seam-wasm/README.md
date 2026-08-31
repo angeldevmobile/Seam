@@ -91,13 +91,18 @@ What a browser downloads, measured by `npm run size`:
 
 | file | raw | gzip | brotli |
 |---|---:|---:|---:|
-| `seam_wasm_bg.wasm` | 128.2 KiB | 57.3 KiB | 50.3 KiB |
+| `seam_wasm_bg.wasm` | 113.9 KiB | 56.6 KiB | 49.4 KiB |
 | glue | 16.3 KiB | 3.8 KiB | 3.4 KiB |
 | wrapper | 6.7 KiB | 2.7 KiB | 2.2 KiB |
-| **total** | **151.2 KiB** | **63.9 KiB** | **56.0 KiB** |
+| **total** | **137.0 KiB** | **63.1 KiB** | **55.0 KiB** |
 
 The engine is a `.seam` parser, a JSON parser and a validator, and it carries
 no dependencies. Rerun the script rather than trusting the table.
+
+The build runs `wasm-opt -Oz`, which takes the module from 128.2 KiB to 113.9,
+an 11% cut. Compressed it is worth about 1.8%, because brotli was already
+finding most of that redundancy — worth doing, not worth quoting as the
+headline it looks like.
 
 ## Status
 

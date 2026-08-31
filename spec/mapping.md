@@ -265,7 +265,21 @@ Enforced in the core so bindings inherit them.
 characters would not bound memory, which is the only thing it is there for.
 
 Exceeding any of these is `size_exceeded`, except depth, which is
-`depth_exceeded`.
+`depth_exceeded`. That code is the same whichever path the payload took, and a
+binding that reports a limit as a parse error rather than as one of these two
+is non-conformant.
+
+**Two things about a limit are not fixed, because they cannot be.** A limit is
+checked while the document is being read, before the value it belongs to
+exists — that is what makes it a bound on hostile input rather than a report
+about one. So a binding handed bytes stops at the first breach and has no path
+to report, while a binding handed host objects finishes the walk and reports
+each breach at its own path. Neither the **path** nor the **number of issues**
+is therefore fixed for a limit. The code is.
+
+This is the one place §9's "every issue in one pass" does not hold, and the
+only rule in this document whose two input paths differ in anything a caller
+can see.
 
 These are defaults, not a security boundary. A service taking untrusted input
 should set them from what a legitimate request actually looks like.

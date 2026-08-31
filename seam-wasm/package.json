@@ -19,7 +19,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "cargo build --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir wasm --out-name seam_wasm target/wasm32-unknown-unknown/release/seam_wasm.wasm",
+    "build": "npm run build:wasm && npm run build:opt",
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir wasm --out-name seam_wasm target/wasm32-unknown-unknown/release/seam_wasm.wasm",
+    "build:opt": "wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int -o wasm/seam_wasm_bg.wasm wasm/seam_wasm_bg.wasm",
     "size": "node scripts/size.mjs",
     "test": "node --test __test__/binding.test.mjs __test__/conformance.test.mjs __test__/browser.test.mjs"
   },
@@ -31,6 +33,7 @@
     "wasm/seam_wasm_bg.wasm"
   ],
   "devDependencies": {
+    "binaryen": "^132.0.0",
     "playwright": "^1.62.1"
   }
 }

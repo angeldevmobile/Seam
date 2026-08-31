@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from seam import Schema, ValidationError
+from seam import Limits, Schema, ValidationError
 
 CONFORMANCE = Path(__file__).resolve().parents[2] / "conformance"
 
@@ -29,7 +29,7 @@ def case_files() -> list[Path]:
     return sorted((CONFORMANCE / "cases").glob("*.json"))
 
 
-def collect() -> list[tuple[str, str, str, dict, object]]:
+def collect() -> list[tuple[str, str, str, dict, object, dict]]:
     out = []
     for path in case_files():
         doc = json.loads(path.read_text(encoding="utf-8"))
@@ -43,17 +43,26 @@ def collect() -> list[tuple[str, str, str, dict, object]]:
                     doc["type"],
                     payload,
                     case["expect"],
+                    case.get("limits", {}),
                 )
             )
     return out
 
 
+# The case files spell limits the way the spec does; the binding takes them
+# under the same names, so nothing has to be translated here.
+LIMIT_KEYS = ("max_depth", "max_items", "max_string_bytes", "max_object_keys")
+
+
 CASES = collect()
 
 
-def found_issues(schema: Schema, type_name: str, payload: dict) -> list[tuple[str, str]]:
+def found_issues(
+    schema: Schema, type_name: str, payload: dict, limits: dict
+) -> list[tuple[str, str]]:
+    bound = schema.validator(type_name, Limits(**{k: limits[k] for k in LIMIT_KEYS if k in limits}))
     try:
-        schema.validate(type_name, payload)
+        bound(payload)
     except ValidationError as e:
         return [(i.path, i.code) for i in e.issues]
     return []
@@ -67,14 +76,23 @@ def expected_issues(expect: object) -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize(
-    "name,schema_name,type_name,payload,expect",
+    "name,schema_name,type_name,payload,expect,limits",
     CASES,
     ids=[c[0] for c in CASES],
 )
-def test_case(name, schema_name, type_name, payload, expect):
+def test_case(name, schema_name, type_name, payload, expect, limits):
     schema = load_schema(schema_name)
-    assert found_issues(schema, type_name, payload) == expected_issues(expect)
+    found = found_issues(schema, type_name, payload, limits)
+
+    # Which codes appeared, not where or how many times. A limit is caught
+    # while parsing, before the value it belongs to exists: a binding fed bytes
+    # stops at the first breach and has no path, while one fed host objects
+    # finishes the walk and reports each. Both must agree on the code.
+    if isinstance(expect, dict) and "codes" in expect:
+        assert sorted({code for _, code in found}) == sorted(expect["codes"])
+    else:
+        assert found == expected_issues(expect)
 
 
 def test_the_suite_is_not_empty():
-    assert len(CASES) >= 68, f"expected a meaningful suite, collected {len(CASES)}"
+    assert len(CASES) >= 75, f"expected a meaningful suite, collected {len(CASES)}"

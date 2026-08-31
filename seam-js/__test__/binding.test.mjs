@@ -156,3 +156,36 @@ test('limits are reachable', () => {
     (e) => e.code === 'size_exceeded',
   )
 })
+
+// --- a limit is a verdict, not a syntax error --------------------------------
+
+test('a limit reports the same code whichever path the payload took', () => {
+  // Parsing stops before the value exists, so the path differs; the code does
+  // not, and the code is what a service acts on.
+  const tight = user.validator('User', { maxStringBytes: 4 })
+  const payload = { id: 1n, name: 'Gabriel', plan: 'pro', nickname: null }
+
+  const codesOf = (p) => {
+    try {
+      tight.validate(p)
+      return []
+    } catch (e) {
+      if (!(e instanceof SeamValidationError)) throw e
+      return [...new Set(e.issues.map((i) => i.code))]
+    }
+  }
+
+  assert.deepEqual(codesOf(raw({ ...payload, id: 1 })), ['size_exceeded'])
+  assert.deepEqual(codesOf(payload), ['size_exceeded'])
+})
+
+test('malformed JSON is still a parse error, not a verdict', () => {
+  // A limit is a statement about the data. Broken syntax is not.
+  let thrown
+  try {
+    validate.validate(Buffer.from('{ nope'))
+  } catch (e) {
+    thrown = e
+  }
+  assert.ok(thrown && !(thrown instanceof SeamValidationError))
+})

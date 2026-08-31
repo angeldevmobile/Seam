@@ -82,26 +82,52 @@ The runner has a self-test (`the_harness_detects_a_wrong_expectation`) that
 feeds it a deliberately wrong expectation. A harness that cannot fail proves
 nothing.
 
+## `limits`, and `codes`
+
+A case may set the engine's limits for itself:
+
+```json
+{
+  "name": "nesting past max_depth is depth_exceeded",
+  "limits": { "max_depth": 2 },
+  "expect": { "codes": ["depth_exceeded"] }
+}
+```
+
+The keys are spelled as the spec spells them. A binding whose own API
+camelCases them translates in its runner, which is the only place the two
+spellings meet.
+
+`expect.codes` asserts **which codes appeared**, not where or how many times,
+and exists for limits alone. A limit is checked while the document is being
+read, before the value it belongs to exists — that is what makes it a bound on
+hostile input rather than a report about one. A binding handed bytes therefore
+stops at the first breach and has no path; a binding handed host objects
+finishes the walk and reports each at its own path. The code is what both must
+agree on, and the code is the stable API. Every other case uses `issues` and
+asserts the path exactly.
+
 ## What this suite does not cover
 
-68 cases over three schemas, asserting 16 of the 20 codes in the mapping spec.
-The four it does not reach, and why, because an uncovered code should be a
-known gap rather than an oversight:
+75 cases over three schemas, asserting 18 of the 20 codes in the mapping spec.
+The two it does not reach, and why, because an uncovered code should be a known
+gap rather than an oversight:
 
 - **`unsafe_integer`** cannot be produced from bytes. It means *the host's own
   value is already the wrong number*, which is a condition of a JavaScript
   `number` past 2^53 and of nothing the suite can write as JSON text. It is
   tested in `seam-js/__test__/binding.test.mjs`, where it belongs.
-- **`depth_exceeded`** and **`size_exceeded`** need limits below the defaults,
-  and a case file cannot yet set them. Adding a `limits` key to the document
-  and honouring it in all three runners would close both.
 - **`unknown_type`** is unreachable by construction: the `.seam` parser rejects
   a dangling reference at parse time, and every binding rejects an undeclared
   type name when the validator is bound, before validation begins.
 
 ## Runners
 
-Three runners share these files today: `seam-core/tests/conformance.rs`,
-`seam-py/tests/test_conformance.py` and `seam-js/__test__/conformance.test.mjs`.
-All three run in CI on Linux, macOS and Windows. Agreement between them is what
-"no drift" means, and it is checked on every push rather than asserted here.
+Four runners share these files today: `seam-core/tests/conformance.rs`,
+`seam-py/tests/test_conformance.py`, `seam-js/__test__/conformance.test.mjs`
+and `seam-wasm/__test__/conformance.test.mjs`. They run in CI on Linux, macOS
+and Windows.
+
+The first two feed the binding host objects; the last two feed it bytes. That
+split is deliberate: it is what caught the one place the two paths disagreed. Agreement between them is what "no
+drift" means, and it is checked on every push rather than asserted here.

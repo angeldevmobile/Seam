@@ -56,7 +56,7 @@ fn every_case_in_the_suite_holds() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert!(ran >= 68, "expected a meaningful suite, ran only {ran}");
+    assert!(ran >= 75, "expected a meaningful suite, ran only {ran}");
 }
 
 /// A harness that cannot fail proves nothing, so check that it can.
@@ -127,7 +127,7 @@ fn run_case(
     let found = match lower(&J::Object(merged), &mut Vec::new()) {
         // Lowering failed, which is itself a conformant verdict.
         Err(issue) => vec![issue],
-        Ok(value) => match validate(schema, type_name, &value, Limits::DEFAULT) {
+        Ok(value) => match validate(schema, type_name, &value, limits_of(case)) {
             Ok(()) => Vec::new(),
             Err(e) => e
                 .issues
@@ -137,32 +137,89 @@ fn run_case(
         },
     };
 
-    let expected = expected_issues(&case["expect"]);
-    if found == expected {
-        Ok(())
-    } else {
-        Err(format!("expected {expected:?}\n    found    {found:?}"))
+    match expectation(&case["expect"]) {
+        // Which codes appeared, not where or how many times. A limit is caught
+        // while parsing, before the value it belongs to exists: a binding fed
+        // bytes stops at the first breach and has no path, while one fed host
+        // objects finishes the walk and reports each. Both must agree on the
+        // code, and the code is the stable API.
+        Expect::Codes(expected) => {
+            let mut codes: Vec<String> = found.iter().map(|(_, c)| c.clone()).collect();
+            codes.sort();
+            codes.dedup();
+            if codes == expected {
+                Ok(())
+            } else {
+                Err(format!(
+                    "expected codes {expected:?}\n    found          {codes:?}"
+                ))
+            }
+        }
+        Expect::Issues(expected) => {
+            if found == expected {
+                Ok(())
+            } else {
+                Err(format!("expected {expected:?}\n    found    {found:?}"))
+            }
+        }
     }
 }
 
-fn expected_issues(expect: &J) -> Found {
+/// Limits for one case. Absent means the engine's defaults, which is what
+/// every case but the ones about limits themselves wants.
+fn limits_of(case: &J) -> Limits {
+    let d = Limits::DEFAULT;
+    let Some(limits) = case.get("limits").and_then(J::as_object) else {
+        return d;
+    };
+    let read = |key: &str, fallback: usize| {
+        limits
+            .get(key)
+            .and_then(J::as_u64)
+            .map_or(fallback, |v| v as usize)
+    };
+    Limits {
+        max_depth: read("max_depth", d.max_depth),
+        max_items: read("max_items", d.max_items),
+        max_string_bytes: read("max_string_bytes", d.max_string_bytes),
+        max_object_keys: read("max_object_keys", d.max_object_keys),
+    }
+}
+
+enum Expect {
+    Issues(Found),
+    Codes(Vec<String>),
+}
+
+fn expectation(expect: &J) -> Expect {
     match expect {
-        J::String(s) if s == "valid" => Vec::new(),
-        J::Object(o) => o
-            .get("issues")
-            .and_then(J::as_array)
-            .map(|issues| {
-                issues
-                    .iter()
-                    .map(|i| {
-                        (
-                            i["path"].as_str().unwrap_or_default().to_string(),
-                            i["code"].as_str().unwrap_or_default().to_string(),
-                        )
+        J::String(s) if s == "valid" => Expect::Issues(Vec::new()),
+        J::Object(o) => {
+            if let Some(codes) = o.get("codes").and_then(J::as_array) {
+                return Expect::Codes(
+                    codes
+                        .iter()
+                        .map(|c| c.as_str().unwrap_or_default().to_string())
+                        .collect(),
+                );
+            }
+            Expect::Issues(
+                o.get("issues")
+                    .and_then(J::as_array)
+                    .map(|issues| {
+                        issues
+                            .iter()
+                            .map(|i| {
+                                (
+                                    i["path"].as_str().unwrap_or_default().to_string(),
+                                    i["code"].as_str().unwrap_or_default().to_string(),
+                                )
+                            })
+                            .collect()
                     })
-                    .collect()
-            })
-            .unwrap_or_default(),
+                    .unwrap_or_default(),
+            )
+        }
         other => panic!("`expect` must be \"valid\" or an object, found {other}"),
     }
 }

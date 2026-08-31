@@ -352,8 +352,18 @@ impl Validator {
     fn run_json<'py>(&self, py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyAny>> {
         // The document records where each value sits; nothing is copied out of
         // the buffer, so a rejected payload is never materialised at all.
-        let doc = seam_core::json::Document::parse(bytes, self.limits)
-            .map_err(|e| ParseError::new_err(e.to_string()))?;
+        // A limit is a verdict, not a syntax error: raised as ValidationError
+        // with the same code the dict path produces, so a caller handles it in
+        // one place regardless of which path the payload took.
+        let doc = match seam_core::json::Document::parse(bytes, self.limits) {
+            Ok(doc) => doc,
+            Err(e) => {
+                return match e.as_validation() {
+                    Some(v) => Err(raise(py, v.issues)),
+                    None => Err(ParseError::new_err(e.to_string())),
+                }
+            }
+        };
         let root = doc.root();
 
         if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &root, self.limits) {
