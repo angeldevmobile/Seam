@@ -85,7 +85,7 @@ export declare class Validator<T = unknown> {
  * and the same generated file serves this package and the Node one:
  *
  * ```ts
- * import { Schema } from 'seam-wasm'
+ * import { Schema } from 'seam-schema-wasm'
  * import type { UserTypes } from './contracts/user.types'
  *
  * const schema = await Schema.parse<UserTypes>(await (await fetch('/user.seam')).text())

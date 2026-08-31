@@ -28,7 +28,7 @@ const HEADER = (source, mapName, firstType) => `\
 // runtime; this file is types only, so deleting it costs you static checking
 // and nothing else.
 //
-//     import { Schema } from 'seam'
+//     import { Schema } from 'seam-schema'
 //     import type { ${mapName} } from './${outputName(source).replace(/\.ts$/, '')}'
 //
 //     const schema = Schema.load<${mapName}>('${source}')

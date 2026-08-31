@@ -61,7 +61,7 @@ from msgspec import Meta, Struct
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Annotated
 
-import seam
+import seam_schema as seam
 
 HERE = Path(__file__).resolve().parent
 SCHEMA = HERE / "schemas" / "bench.seam"

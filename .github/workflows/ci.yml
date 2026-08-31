@@ -142,6 +142,31 @@ jobs:
       - run: npm run size
         working-directory: seam-wasm
 
+  # Every other job tests the checkout, where `../../conformance` exists and
+  # the native module sits where the build left it. This one builds each
+  # package the way a registry would receive it and installs it somewhere else
+  # entirely, because that is where a missing file in `files`/`include` shows
+  # up. Publishing cannot be undone, so it runs before a release, not after.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install maturin
+      - run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+      - run: npm ci && npm run build
+        working-directory: seam-js
+      - run: npm ci && npm run build
+        working-directory: seam-wasm
+      - run: node scripts/packaging-smoke.mjs
+
   # seam-py is outside the workspace, so it needs its own lint pass.
   python-lint:
     runs-on: ubuntu-latest

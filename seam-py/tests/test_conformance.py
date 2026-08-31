@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from seam import Limits, Schema, ValidationError
+from seam_schema import Limits, Schema, ValidationError
 
 CONFORMANCE = Path(__file__).resolve().parents[2] / "conformance"
 

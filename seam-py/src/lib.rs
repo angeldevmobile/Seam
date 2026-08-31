@@ -29,7 +29,7 @@ create_exception!(_seam, ParseError, PyException);
 /// bookkeeping. The path strings, the `Issue` objects and the summary are all
 /// produced on first access. Rejecting a request is a hot path in any service
 /// facing a network, and it should not cost more than accepting one.
-#[pyclass(frozen, skip_from_py_object, module = "seam")]
+#[pyclass(frozen, skip_from_py_object, module = "seam_schema")]
 pub struct Issues {
     inner: Vec<seam_core::Issue>,
 }
@@ -88,7 +88,7 @@ impl Issues {
     }
 }
 
-#[pyclass(frozen, get_all, skip_from_py_object, module = "seam")]
+#[pyclass(frozen, get_all, skip_from_py_object, module = "seam_schema")]
 #[derive(Clone)]
 pub struct Issue {
     pub path: String,
@@ -110,7 +110,7 @@ impl Issue {
     }
 }
 
-#[pyclass(frozen, skip_from_py_object, module = "seam")]
+#[pyclass(frozen, skip_from_py_object, module = "seam_schema")]
 #[derive(Clone, Copy)]
 pub struct Limits {
     inner: seam_core::Limits,
@@ -158,7 +158,7 @@ impl Limits {
     }
 }
 
-#[pyclass(module = "seam")]
+#[pyclass(module = "seam_schema")]
 pub struct Schema {
     // Shared with every Validator bound to it, so binding one costs a refcount
     // rather than a copy of the schema.
@@ -268,7 +268,7 @@ impl Schema {
 }
 
 /// One type of one schema, ready to validate.
-#[pyclass(module = "seam")]
+#[pyclass(module = "seam_schema")]
 pub struct Validator {
     schema: Arc<seam_core::Schema>,
     type_name: String,
@@ -525,7 +525,7 @@ static VALIDATION_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
 fn error_type<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyType>> {
     let cls = VALIDATION_ERROR.get_or_try_init(py, || {
-        py.import("seam")?
+        py.import("seam_schema")?
             .getattr("ValidationError")?
             .cast_into::<PyType>()
             .map(Bound::unbind)

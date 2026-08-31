@@ -1,8 +1,15 @@
 {
-  "name": "seam-wasm",
+  "name": "seam-schema-wasm",
   "version": "0.0.0",
   "description": "One schema. Every language. No drift. The browser build.",
   "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "schema",
+    "validation",
+    "json",
+    "cross-language",
+    "contract"
+  ],
   "repository": "https://github.com/angeldevmobile/Seam",
   "type": "module",
   "main": "index.js",

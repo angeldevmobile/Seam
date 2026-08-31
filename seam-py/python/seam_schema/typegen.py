@@ -37,7 +37,7 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import NotRequired
 
-from seam import Schema
+from seam_schema import Schema
 
 _SCHEMA = Schema.load(Path(__file__).parent / "{schema_file}")
 '''

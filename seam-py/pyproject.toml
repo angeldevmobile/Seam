@@ -3,9 +3,10 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "seam"
+name = "seam-schema"
 requires-python = ">=3.9"
 description = "One schema. Every language. No drift."
+keywords = ["schema", "validation", "json", "cross-language", "contract"]
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 classifiers = [
@@ -19,7 +20,7 @@ dynamic = ["version"]
 dependencies = ["typing_extensions>=4.6; python_version < '3.11'"]
 
 [project.scripts]
-seam = "seam.cli:main"
+seam = "seam_schema.cli:main"
 
 [project.urls]
 Repository = "https://github.com/angeldevmobile/Seam"
@@ -28,7 +29,7 @@ Repository = "https://github.com/angeldevmobile/Seam"
 test = ["pytest>=7", "mypy>=1.8"]
 
 [tool.maturin]
-module-name = "seam._seam"
+module-name = "seam_schema._seam"
 python-source = "python"
 features = ["pyo3/extension-module"]
 

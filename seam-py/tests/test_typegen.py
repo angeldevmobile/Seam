@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from seam import Schema
-from seam.cli import main
-from seam.typegen import generate
+from seam_schema import Schema
+from seam_schema.cli import main
+from seam_schema.typegen import generate
 
 CONFORMANCE = Path(__file__).resolve().parents[2] / "conformance"
 USER_SEAM = CONFORMANCE / "schemas" / "user.seam"

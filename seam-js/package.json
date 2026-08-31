@@ -1,8 +1,15 @@
 {
-  "name": "seam",
+  "name": "seam-schema",
   "version": "0.0.0",
-  "description": "One schema. Every language. No drift.",
+  "description": "One schema. Every language. No drift. Native Node binding.",
   "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "schema",
+    "validation",
+    "json",
+    "cross-language",
+    "contract"
+  ],
   "repository": "https://github.com/angeldevmobile/Seam",
   "main": "index.js",
   "types": "index.d.ts",

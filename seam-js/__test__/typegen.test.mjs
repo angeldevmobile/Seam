@@ -126,7 +126,7 @@ function tsc(dir, files) {
         module: 'preserve',
         moduleResolution: 'bundler',
         skipLibCheck: true,
-        paths: { seam: [join(PACKAGE, 'index.d.ts')] },
+        paths: { 'seam-schema': [join(PACKAGE, 'index.d.ts')] },
       },
       files,
     }),
@@ -148,7 +148,7 @@ function check(body) {
 }
 
 const USE = `
-import { Schema } from 'seam'
+import { Schema } from 'seam-schema'
 import type { PersonTypes, Person } from './person.types'
 
 const schema = Schema.load<PersonTypes>('person.seam')
@@ -191,7 +191,7 @@ test('tsc catches a 64-bit field used as a number', () => {
 test('tsc catches a type name the schema does not declare', () => {
   // What the generated map buys over a cast: the string is checked too.
   const result = check(`
-import { Schema } from 'seam'
+import { Schema } from 'seam-schema'
 import type { PersonTypes } from './person.types'
 
 Schema.load<PersonTypes>('person.seam').validator('Persn')
@@ -204,7 +204,7 @@ test('a schema loaded without the map still checks, as unknown', () => {
   // The generated file is optional. Without it nothing breaks; `validate`
   // returns `unknown`, which is the honest type for an undescribed payload.
   const result = check(`
-import { Schema } from 'seam'
+import { Schema } from 'seam-schema'
 
 const out: unknown = Schema.load('person.seam').validator('Anything').validate({})
 void out
@@ -319,7 +319,7 @@ function unionProject() {
 }
 
 const USE_UNION = `
-import { Schema } from 'seam'
+import { Schema } from 'seam-schema'
 import type { FeedTypes, Event } from './feed.types'
 
 const schema = Schema.load<FeedTypes>('feed.seam')

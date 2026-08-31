@@ -1,6 +1,14 @@
 [package]
 name = "seam-core"
 description = "The Seam validation engine: .seam parsing, schema compilation, and validation."
+readme = "README.md"
+keywords = ["schema", "validation", "json", "cross-language", "contract"]
+categories = ["parser-implementations", "encoding", "data-structures"]
+
+# These two read `../conformance`, which is not part of the crate. Shipping a
+# test that cannot run is worse than shipping none: `unions.rs` is
+# self-contained and `fuzz.rs` degrades to its built-in seeds, so both stay.
+exclude = ["tests/conformance.rs", "tests/schemas.rs"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

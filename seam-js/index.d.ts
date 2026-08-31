@@ -86,7 +86,7 @@ export declare class Validator<T = unknown> {
  * `M` maps each declared type name to its shape. `seam typegen` generates one:
  *
  * ```ts
- * import { Schema } from 'seam'
+ * import { Schema } from 'seam-schema'
  * import type { UserTypes } from './user.types'
  *
  * const schema = Schema.load<UserTypes>('user.seam')

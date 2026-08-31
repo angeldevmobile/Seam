@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from seam import Limits, ParseError, Schema, ValidationError
+from seam_schema import Limits, ParseError, Schema, ValidationError
 
 CONFORMANCE = Path(__file__).resolve().parents[2] / "conformance"
 
@@ -213,7 +213,7 @@ def test_a_bound_validator_exposes_its_type(user):
 
 
 def test_the_generated_module_binds_once(tmp_path):
-    from seam.typegen import generate
+    from seam_schema.typegen import generate
 
     seam_file = tmp_path / "u.seam"
     seam_file.write_text("schema U { x: String }\n", encoding="utf-8")
