@@ -56,7 +56,7 @@ fn every_case_in_the_suite_holds() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert!(ran >= 75, "expected a meaningful suite, ran only {ran}");
+    assert!(ran >= 78, "expected a meaningful suite, ran only {ran}");
 }
 
 /// A harness that cannot fail proves nothing, so check that it can.
@@ -137,6 +137,9 @@ fn run_case(
         },
     };
 
+    // Rust's integers are exact, so the plain expectation is the one that
+    // applies. A case carrying `expect_inexact_integers` describes a host this
+    // one is not.
     match expectation(&case["expect"]) {
         // Which codes appeared, not where or how many times. A limit is caught
         // while parsing, before the value it belongs to exists: a binding fed

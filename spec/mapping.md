@@ -250,6 +250,14 @@ Codes: `required`, `null_not_allowed`, `type_mismatch`, `out_of_range`,
 Adding a code is a minor change. Renaming one, removing one, or changing which
 condition produces one is breaking.
 
+**A code is a code on every path.** A binding that reports one of these as a
+generic failure, a parse error, or a host exception without the code is
+non-conformant, even where it detects the problem earlier than validation. A
+name the schema does not declare is `unknown_type` whether it is caught when a
+validator is bound or when a payload arrives, and it is reported at the root:
+`path` is a route through the payload, and a type name is not a key of
+anything.
+
 ## 10. Limits
 
 Enforced in the core so bindings inherit them.

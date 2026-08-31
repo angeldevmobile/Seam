@@ -104,7 +104,13 @@ class Schema {
    * the payload is resolved here rather than on every call.
    */
   validator(typeName, limits) {
-    return new Validator(this.#inner.validator(typeName, limits))
+    // Same shape as `validate`, for the same reason: a name the schema does
+    // not declare is `unknown_type`, a code the mapping spec fixes. Reporting
+    // it as a generic failure would give one mistake a different code in every
+    // binding, which is the drift this project exists to prevent.
+    const outcome = this.#inner.validator(typeName, limits)
+    if (outcome.ok) return new Validator(outcome.value)
+    throw new SeamValidationError(outcome.issues)
   }
 
   /** Convenience for one-off validation; binds and discards. */

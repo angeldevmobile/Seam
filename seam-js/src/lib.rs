@@ -106,19 +106,37 @@ impl Schema {
 
     /// Binds one type. Everything that does not depend on the payload is
     /// resolved here rather than on every call.
+    ///
+    /// Reports the same `{ ok, issues }` shape as `validate`, because a name
+    /// the schema does not declare is `unknown_type` — a code the mapping spec
+    /// fixes, not a generic failure. Losing it here would mean the same
+    /// mistake carried a different code in each binding.
     #[napi]
-    pub fn validator(&self, type_name: String, limits: Option<JsLimits>) -> Result<Validator> {
+    pub fn validator<'env>(
+        &self,
+        env: &'env Env,
+        type_name: String,
+        limits: Option<JsLimits>,
+    ) -> Result<Object<'env>> {
         if !self.inner.declares(&type_name) {
-            return Err(Error::new(
-                Status::InvalidArg,
-                format!("schema declares no type named `{type_name}`"),
-            ));
+            return refused(
+                env,
+                seam_core::ValidationError {
+                    issues: vec![seam_core::Issue {
+                        // Not at any path: the name is not a key of the payload.
+                        path: seam_core::Path(Vec::new()),
+                        code: seam_core::Code::UnknownType,
+                        message: format!("schema declares no type named `{type_name}`"),
+                    }],
+                },
+            );
         }
-        Ok(Validator {
+        let validator = Validator {
             schema: std::sync::Arc::clone(&self.inner),
             type_name,
             limits: limits.map_or(seam_core::Limits::DEFAULT, |l| l.to_core()),
-        })
+        };
+        accepted(env, validator.into_instance(env)?.to_unknown())
     }
 }
 

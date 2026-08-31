@@ -1,0 +1,13 @@
+{
+  "schema": "user",
+  "type": "Nope",
+  "note": "The whole file validates against a type `user.seam` does not declare. That is the only way to reach `unknown_type` from a .seam file: the parser rejects a dangling reference inside a schema at parse time, so the name can only go wrong where the caller supplies it.",
+  "cases": [
+    {
+      "name": "a type the schema does not declare is unknown_type",
+      "note": "Reported at the root, not at the name: `path` is a route through the payload and a type name is not a key of anything. Reported as an issue with a code, not as a generic failure. A binding may detect it when the validator is bound rather than when a payload arrives, which is earlier and better, but the code must be the same either way.",
+      "input": { "id": 1 },
+      "expect": { "issues": [{ "path": "<root>", "code": "unknown_type" }] }
+    }
+  ]
+}

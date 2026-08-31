@@ -60,8 +60,13 @@ CASES = collect()
 def found_issues(
     schema: Schema, type_name: str, payload: dict, limits: dict
 ) -> list[tuple[str, str]]:
-    bound = schema.validator(type_name, Limits(**{k: limits[k] for k in LIMIT_KEYS if k in limits}))
+    # Binding is inside the try on purpose: a binding may report an undeclared
+    # type name when the validator is bound rather than when a payload
+    # arrives, which is earlier and better, and it is still the same verdict.
     try:
+        bound = schema.validator(
+            type_name, Limits(**{k: limits[k] for k in LIMIT_KEYS if k in limits})
+        )
         bound(payload)
     except ValidationError as e:
         return [(i.path, i.code) for i in e.issues]
@@ -81,6 +86,9 @@ def expected_issues(expect: object) -> list[tuple[str, str]]:
     ids=[c[0] for c in CASES],
 )
 def test_case(name, schema_name, type_name, payload, expect, limits):
+    # Python's integers are exact and this runner always feeds host values, so
+    # `host_value` needs nothing here and `expect_inexact_integers` describes a
+    # host this is not.
     schema = load_schema(schema_name)
     found = found_issues(schema, type_name, payload, limits)
 
@@ -95,4 +103,4 @@ def test_case(name, schema_name, type_name, payload, expect, limits):
 
 
 def test_the_suite_is_not_empty():
-    assert len(CASES) >= 75, f"expected a meaningful suite, collected {len(CASES)}"
+    assert len(CASES) >= 78, f"expected a meaningful suite, collected {len(CASES)}"

@@ -53,16 +53,24 @@ function collect() {
     const doc = JSON.parse(readFileSync(join(CONFORMANCE, 'cases', file), 'utf8'))
     const base = doc.base ?? {}
     for (const c of doc.cases) {
-      // Prefer the exact text where a case says the bytes matter.
-      const payload = c.input_raw
-        ? Buffer.from(c.input_raw)
-        : Buffer.from(JSON.stringify({ ...base, ...(c.input ?? {}) }))
+      const merged = { ...base, ...(c.input ?? {}) }
+      // `host_value` means feed the binding this runtime's own values, which is
+      // the only way to reach the rules about what a host cannot hold. Note
+      // that `merged` has already been through JSON.parse by now — for the
+      // 2^53 case that corruption is the condition under test, not a flaw.
+      const payload = c.host_value
+        ? merged
+        : c.input_raw
+          ? Buffer.from(c.input_raw)
+          : Buffer.from(JSON.stringify(merged))
       out.push({
         name: `${file} :: ${c.name}`,
         schema: doc.schema,
         type: doc.type,
         payload,
-        expect: c.expect,
+        // JavaScript numbers are not exact past 2^53, so where a case
+        // distinguishes, this runner takes the inexact expectation.
+        expect: c.expect_inexact_integers ?? c.expect,
         limits: limitsOf(c),
       })
     }
@@ -93,7 +101,7 @@ function codesOf(found) {
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 75, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 78, `collected only ${CASES.length}`)
 })
 
 for (const c of CASES) {

@@ -1,0 +1,28 @@
+{
+  "schema": "user",
+  "type": "User",
+  "note": "Cases about what happens when a binding is handed its host's own values rather than bytes. `host_value: true` says so; a binding with no such path skips them, and says it skipped rather than passing quietly.",
+  "base": {
+    "id": 1,
+    "name": "Gabriel",
+    "plan": "pro",
+    "nickname": null
+  },
+  "cases": [
+    {
+      "name": "a host value round-trips like bytes when nothing is lost",
+      "host_value": true,
+      "expect": "valid"
+    },
+    {
+      "name": "an integer past 2^53 is refused where the host cannot hold it",
+      "note": "This case is its own demonstration. A runner in JavaScript loads this file with JSON.parse, which turns the id below into ...992 before the runner has done anything — which is exactly the condition `unsafe_integer` names. A runner whose integers are exact sees the value intact and must accept it, because for that host nothing was lost. This is the one rule in the spec whose verdict depends on the host rather than on the data.",
+      "host_value": true,
+      "input": { "id": 9007199254740993 },
+      "expect": "valid",
+      "expect_inexact_integers": {
+        "issues": [{ "path": "id", "code": "unsafe_integer" }]
+      }
+    }
+  ]
+}

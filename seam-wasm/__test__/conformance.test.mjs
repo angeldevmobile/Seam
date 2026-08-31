@@ -68,6 +68,11 @@ function collect() {
         payload,
         expect: c.expect,
         limits: limitsOf(c),
+        // This package has no object path at all, so a case about what a host
+        // does with its own values cannot be reproduced here. Skipped out
+        // loud: a case that quietly passed by not running would be worse than
+        // one that fails.
+        hostValue: c.host_value === true,
       })
     }
   }
@@ -81,9 +86,14 @@ function expected(expect) {
   return (expect.issues ?? []).map((i) => [i.path, i.code])
 }
 
-function found(validator, payload) {
+/**
+ * Binding is inside the try on purpose: a binding may report an undeclared
+ * type name when the validator is bound rather than when a payload arrives,
+ * which is earlier and better, and it is still the same verdict.
+ */
+function found(schema, typeName, payload, limits) {
   try {
-    validator.validate(payload)
+    schema.validator(typeName, limits).validate(payload)
     return []
   } catch (e) {
     if (!(e instanceof SeamValidationError)) throw e
@@ -92,9 +102,12 @@ function found(validator, payload) {
 }
 
 for (const c of CASES) {
-  test(c.name, async () => {
+  test(c.name, async (t) => {
+    if (c.hostValue) {
+      return t.skip('this binding takes bytes only, by design')
+    }
     const schema = await load(c.schema)
-    const got = found(schema.validator(c.type, c.limits), c.payload)
+    const got = found(schema, c.type, c.payload, c.limits)
     // A limit is caught while parsing, before the value it belongs to exists:
     // a binding fed bytes stops at the first breach and has no path, while one
     // fed host objects finishes the walk and reports each. Both must agree on
@@ -111,13 +124,13 @@ for (const c of CASES) {
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 75, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 78, `collected only ${CASES.length}`)
 })
 
 test('the harness detects a wrong expectation', async () => {
   // A harness that cannot fail proves nothing.
   const schema = await load('user')
   const valid = Buffer.from('{"id":1,"name":"Gabriel","plan":"pro","nickname":null}')
-  assert.deepEqual(found(schema.validator('User'), valid), [])
-  assert.notDeepEqual(found(schema.validator('User'), Buffer.from('{"id":1}')), [])
+  assert.deepEqual(found(schema, 'User', valid, {}), [])
+  assert.notDeepEqual(found(schema, 'User', Buffer.from('{"id":1}'), {}), [])
 })

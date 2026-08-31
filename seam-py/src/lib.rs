@@ -228,8 +228,7 @@ impl Schema {
         if !self.inner.declares(type_name) {
             return Err(raise(
                 py,
-                one_issue(
-                    type_name,
+                root_issue(
                     Code::UnknownType,
                     format!("schema declares no type named `{type_name}`"),
                 ),
@@ -334,8 +333,7 @@ impl Validator {
         let Some((object_type, tag)) = shape(&self.schema, &self.type_name, &input) else {
             return Err(raise(
                 py,
-                one_issue(
-                    &self.type_name,
+                root_issue(
                     Code::UnknownType,
                     format!("schema declares no type named `{}`", self.type_name),
                 ),
@@ -373,8 +371,7 @@ impl Validator {
         let Some((object_type, tag)) = shape(&self.schema, &self.type_name, &root) else {
             return Err(raise(
                 py,
-                one_issue(
-                    &self.type_name,
+                root_issue(
                     Code::UnknownType,
                     format!("schema declares no type named `{}`", self.type_name),
                 ),
@@ -550,12 +547,13 @@ fn raise(py: Python<'_>, issues: Vec<seam_core::Issue>) -> PyErr {
 
 /// A single issue at a top-level key, for the failures the engine does not
 /// produce itself.
-fn one_issue(key: &str, code: Code, message: String) -> Vec<seam_core::Issue> {
-    vec![seam_core::Issue {
-        path: seam_core::Path(vec![seam_core::Segment::Key(key.to_string())]),
-        code,
-        message,
-    }]
+/// One issue about the whole call rather than about a place in the payload.
+///
+/// A type name the schema does not declare is not at any path: `path` is a
+/// route through the value, and the name is not a key of anything. The engine
+/// reports it at the root, and so does this.
+fn root_issue(code: Code, message: String) -> Vec<seam_core::Issue> {
+    vec![seam_core::Issue { path: seam_core::Path(Vec::new()), code, message }]
 }
 
 /// Everything resolved once when a validator is bound.
