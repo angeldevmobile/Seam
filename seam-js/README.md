@@ -1,10 +1,10 @@
-# seam
+# seam-schema
 
 Node bindings for [Seam](https://github.com/angeldevmobile/Seam): one schema,
 every language, no drift.
 
 ```js
-const { Schema } = require('seam')
+const { Schema } = require('seam-schema')
 
 const user = Schema.load('contracts/user.seam').validator('User')
 const out = user.validate(rawRequestBody)   // a Buffer, a string, or an object
@@ -58,7 +58,7 @@ A `DateTime` without an offset is rejected. Seam never assumes local time.
 ## Errors
 
 ```js
-const { SeamValidationError } = require('seam')
+const { SeamValidationError } = require('seam-schema')
 
 try {
   user.validate(payload)
@@ -94,7 +94,7 @@ Delete it and everything still works; you lose static checking and nothing
 else. Validation happens in the engine, against the `.seam` file, at runtime.
 
 ```ts
-import { Schema } from 'seam'
+import { Schema } from 'seam-schema'
 import type { UserTypes } from './contracts/user.types'
 
 const schema = Schema.load<UserTypes>('contracts/user.seam')

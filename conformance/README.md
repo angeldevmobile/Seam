@@ -140,7 +140,7 @@ spec whose answer depends on the host rather than on the payload.
 
 ## Coverage
 
-78 cases over three schemas, asserting **all 20** codes in the mapping spec.
+95 cases over four schemas, asserting **all 21** codes in the mapping spec.
 
 Getting the last two took finding two real defects rather than writing two
 cases, which is what the suite is for:

@@ -1,10 +1,10 @@
-# seam-wasm
+# seam-schema-wasm
 
 The browser build of [Seam](https://github.com/angeldevmobile/Seam): one schema,
 every language, no drift.
 
 ```js
-import { Schema } from 'seam-wasm'
+import { Schema } from 'seam-schema-wasm'
 
 const schema = await Schema.parse(await (await fetch('/contracts/user.seam')).text())
 const user = schema.validator('User')
@@ -74,7 +74,7 @@ for a cost that is specific to this binding.
 `seam typegen` generates one file that serves this package and the Node one:
 
 ```ts
-import { Schema } from 'seam-wasm'
+import { Schema } from 'seam-schema-wasm'
 import type { UserTypes, User } from './contracts/user.types'
 
 const schema = await Schema.parse<UserTypes>(source)

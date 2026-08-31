@@ -1,10 +1,10 @@
-# seam
+# seam-schema
 
 Python bindings for [Seam](https://github.com/angeldevmobile/Seam): one schema,
 every language, no drift.
 
 ```python
-from seam import Schema
+from seam_schema import Schema
 
 schema = Schema.load("contracts/user.seam")
 user = schema.validate("User", payload)
@@ -25,7 +25,7 @@ aware `datetime`, and a `u64` keeps every one of its bits.
 ## Errors
 
 ```python
-from seam import ValidationError
+from seam_schema import ValidationError
 
 try:
     schema.validate("User", payload)
@@ -43,7 +43,7 @@ Untrusted input is bounded in the engine, so the defaults apply whether or not
 you ask. Tighten them to what a legitimate request actually looks like:
 
 ```python
-from seam import Limits
+from seam_schema import Limits
 
 schema.validate("User", payload, Limits(max_items=100, max_string_bytes=4096))
 ```
