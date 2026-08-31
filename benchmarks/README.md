@@ -12,25 +12,19 @@ own environment, and `--json` writes the raw samples.
 
 ## Results, 2026-08-30
 
-Median nanoseconds per validation of an already-parsed dict. Lower is better.
+Median nanoseconds per validation. Lower is better. One run, reproduced by
+`python benchmarks/bench.py`; the raw samples are in `results.json`.
 
 ### From an already-parsed dict
 
-This isolates the validator, which is what the optimisation work below targets.
+This isolates the validator.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 2 355 | **341** | 1 666 |
-| nested + date | 3 729 | **500** | 2 735 |
-| array of 100 strings | 9 780 | **795** | 2 911 |
-| rejected payload | 2 351 | **940** | 1 967 |
-
-| scenario | seam | msgspec | pydantic v2 |
-|---|---:|---:|---:|
-| flat, 6 fields | 6.9x | 1.00x | 4.9x |
-| nested + date | 7.5x | 1.00x | 5.5x |
-| array of 100 strings | 12.3x | 1.00x | 3.7x |
-| rejected payload | 2.5x | 1.00x | 2.1x |
+| flat, 6 fields | 2 850 | **468** | 2 918 |
+| nested + date | 5 324 | **689** | 3 434 |
+| array of 100 strings | 14 124 | **1 224** | 4 041 |
+| rejected payload | 3 198 | **1 311** | 2 848 |
 
 ### From raw JSON bytes, as a request actually arrives
 
@@ -39,37 +33,47 @@ someone asks how fast Seam is.
 
 | scenario | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 1 721 | **447** | 1 670 |
-| nested + date | 3 039 | **643** | 2 484 |
-| array of 100 strings | 9 961 | **3 684** | 5 266 |
-
-| scenario | seam | msgspec | pydantic v2 |
-|---|---:|---:|---:|
-| flat, 6 fields | 3.9x | 1.00x | 3.7x |
-| nested + date | 4.7x | 1.00x | 3.9x |
-| array of 100 strings | 2.7x | 1.00x | 1.4x |
+| flat, 6 fields | 2 120 | **564** | 2 219 |
+| nested + date | 4 353 | **843** | 3 308 |
+| array of 100 strings | 13 354 | **4 471** | 6 828 |
 
 Seam is *faster from bytes than from a dict*, the same shape pydantic has,
 because parsing straight into the result skips building a dict nobody asked for.
-
-Nested is about 1.2x pydantic and the array row about 1.8x. The flat row moved
-enough between runs to deserve its own paragraph, below the environment note.
 
 Before Seam owned the parse this table read 4 668, 7 069 and 15 685 ns, which
 was 2.8-3.0x pydantic.
 
 Environment: CPython 3.13.2, Windows 11 (10.0.26200), Intel64 Family 6 Model
 140 Stepping 1, seam 0.0.0 (release build, abi3), msgspec 0.21.1, pydantic
-2.13.5. Nine repeats per cell, each at least 50 ms, median reported.
+2.13.5. Seven repeats per cell, each at least 50 ms, median reported.
 
-Across five runs the flat row came out at 1 721, 1 877, 1 902, 1 919 and 2 339 ns
-against pydantic's 1 670, 1 685, 1 756, 1 662 and 1 778. Paired, that is 1.03x,
-1.11x, 1.08x, 1.16x and 1.32x, so **Seam costs between 1.03x and 1.32x pydantic
-on a flat payload, with a median of 1.11x** — close, and on the best run within
-noise of it, but not parity. Every row is still slower than both competitors.
+### The flat row, over eight runs
 
-The spread is the point of the section below: a single run of this row is not
-evidence, in either direction.
+One run of this row is not evidence, so here are all of them. Seam against
+pydantic, each pair measured in the same session:
+
+| seam | 1 721 | 1 877 | 1 902 | 1 919 | 2 339 | 2 120 | 2 500 | 2 313 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **pydantic** | 1 670 | 1 685 | 1 756 | 1 662 | 1 778 | 2 219 | 2 076 | 2 490 |
+| **ratio** | 1.03x | 1.11x | 1.08x | 1.16x | 1.32x | **0.96x** | 1.20x | **0.93x** |
+
+**Between 0.93x and 1.32x pydantic, median 1.10x**, and Seam came out ahead in
+two of the eight. On a flat payload the two are inside each other's noise: the
+honest statement is that neither is reliably faster, not that either wins.
+
+Nested is about 1.21x pydantic and the array row about 1.96x, both medians of
+three runs measured today. The array row is where Seam is furthest behind and
+where the schema being read at runtime costs the most.
+
+Every row remains several times msgspec, and that is structural rather than
+fixable: its fields are slots in a layout fixed at compile time, while a Seam
+schema is a file read at runtime. That is the price of the schema being
+portable.
+
+**None of this says anything about whether Seam got faster or slower.** The
+five earlier runs and the three from today were taken in different sessions,
+and the section below is about why that comparison is not available. What the
+eight pairs support is the ratio, because each pair was measured together.
 
 ## Why cross-run comparison is not allowed here
 
@@ -267,6 +271,11 @@ all. Measured on the same metric, per array element:
 | | stage 1 | stage 2 |
 |---|---:|---:|
 | array of 100, from bytes | 13 748 ns | **9 961 ns** |
+
+Both measured in the same session as each other, which is what makes the pair
+meaningful; neither is comparable with the table at the top of this file, taken
+on a different day. What the pair shows is the size of the change, not the
+speed of the engine today.
 
 An owned `String` is still produced for a string that carried escapes, which is
 the only case that needs one.

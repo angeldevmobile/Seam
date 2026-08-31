@@ -255,15 +255,20 @@ Measured from raw JSON bytes, which is what a service actually holds when a requ
 
 | | seam | msgspec | pydantic v2 |
 |---|---:|---:|---:|
-| flat, 6 fields | 1 721 ns | **447** | 1 670 |
-| nested + a date | 3 039 ns | **643** | 2 484 |
-| array of 100 strings | 9 961 ns | **3 684** | 5 266 |
+| flat, 6 fields | 2 120 ns | **564** | 2 219 |
+| nested + a date | 4 353 ns | **843** | 3 308 |
+| array of 100 strings | 13 354 ns | **4 471** | 6 828 |
 
-That is one run. Across five, **a flat payload costs between 1.03x and 1.32x pydantic v2, median
-1.11x** — close, and on the best run within noise of it, but not parity. Every row is slower than
-both competitors, and msgspec will stay ahead in every scenario: its fields are slots in a layout
-fixed at compile time, while a Seam schema is a file read at runtime. That is the price of the
-schema being portable, and it is the whole point rather than a defect.
+That is one run, and one run of the flat row is not evidence. Across eight, each pair measured in
+the same session, **a flat payload costs between 0.93x and 1.32x pydantic v2, median 1.10x** —
+with Seam ahead in two of them. On a flat payload the two are inside each other's noise, and the
+honest statement is that neither is reliably faster. Nested is about 1.2x and the array row about
+2x, which is where a schema read at runtime costs the most.
+
+msgspec stays several times ahead in every scenario, and that is structural rather than fixable:
+its fields are slots in a layout fixed at compile time, while a Seam schema is a file read at
+runtime. That is the price of the schema being portable, and it is the whole point rather than a
+defect.
 
 Four things earn those numbers, and each was measured on its own before it was kept:
 
