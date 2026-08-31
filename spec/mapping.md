@@ -327,6 +327,16 @@ can see.
 These are defaults, not a security boundary. A service taking untrusted input
 should set them from what a legitimate request actually looks like.
 
+**`max_depth` has a ceiling of 256, and a binding may not raise it.** It is the
+one limit whose breach is not reportable: both the JSON reader and the
+validator recurse, so exceeding the stack kills the process instead of
+producing an issue, taking every other request in flight with it. Measured, that
+begins somewhere between one and five thousand levels. A request for more is
+silently held at 256 rather than refused, because the caller asking for it has
+not done anything wrong — they have asked for something the machine cannot
+promise. Every other limit bounds memory, is enforced where it is exceeded, and
+is the caller's to set.
+
 ## Open questions
 
 - Unicode normalization: should `@min_len` count before or after NFC?

@@ -87,6 +87,9 @@ pub struct Document<'a> {
 impl<'a> Document<'a> {
     /// Parses one document, rejecting anything after it.
     pub fn parse(input: &'a [u8], limits: Limits) -> Result<Self, JsonError> {
+        // See `Limits::MAX_DEPTH`: this parser recurses, and a stack overflow
+        // kills the process rather than raising anything a caller can catch.
+        let limits = limits.clamped();
         if u32::try_from(input.len()).is_err() {
             return Err(JsonError {
                 line: 1,

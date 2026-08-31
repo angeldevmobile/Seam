@@ -17,6 +17,10 @@ pub fn validate<I: Input>(
     input: &I,
     limits: Limits,
 ) -> Result<(), ValidationError> {
+    // Clamped here rather than in each binding: depth is the one limit whose
+    // breach is fatal instead of reportable, so nothing may raise it past what
+    // the stack can take.
+    let limits = limits.clamped();
     let mut v = Validator { schema, limits, path: Vec::new(), issues: Vec::new() };
 
     match schema.get(type_name) {

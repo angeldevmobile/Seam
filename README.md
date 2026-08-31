@@ -307,7 +307,9 @@ serialization true.
   anything. There is no expression language and no eval, so a schema from an untrusted source
   is a parsing problem rather than a sandboxing problem.
 - **Hostile input is bounded.** Configurable limits on nesting depth, collection length, and
-  total input size, enforced in the core so every binding inherits them.
+  total input size, enforced in the core so every binding inherits them. Nesting depth has a
+  hard ceiling no binding can raise: it is the only limit whose breach is a dead process rather
+  than an error, because both the reader and the validator recurse.
 - **Stable error contract.** `path`, `code`, and `message` are public API. `code` is a stable
   machine-readable identifier and changes only on a major version.
 
