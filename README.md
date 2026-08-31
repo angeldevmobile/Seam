@@ -140,6 +140,41 @@ been getting this wrong for a decade.
 | `optional String` | `Option<String>` | `str \| Absent` | `string \| undefined` | `Optional<String>` |
 | `optional String?` | `Option<Option<String>>` | `str \| None \| Absent` | `string \| null \| undefined` | `JsonNullable<String>` |
 
+### Tagged unions, with the tag written down
+
+```
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+```
+
+`@tag` is mandatory. There is no default and no inference from the variants, for the same
+reason a naive datetime is an error rather than a guess: a union that decided for itself which
+field discriminates would be guessing what the data means.
+
+The tag belongs to the union, so no variant may declare it — that would be two sources of truth
+for one value. It is still carried through to the validated value, it is never reported as an
+unknown field, and a variant is not a level of nesting: an issue inside the chosen variant is
+`latest.amount`, never `latest.created.amount`.
+
+Both generators pin the tag to a literal, so a type checker narrows on it:
+
+```typescript
+if (event.type === "created") {
+  event.amount;        // bigint — the compiler knows which variant this is
+}
+```
+
+```python
+if event["type"] == "created":
+    event["amount"]    # int — mypy knows too
+```
+
+A tag naming no variant is `unknown_variant`, and it is the *only* issue reported: with no
+variant chosen there is no shape to check the rest against, and picking one anyway would
+produce a list of errors about a payload nobody claimed to send.
+
 ### Dates and integers are pinned, not inferred
 
 | `.seam` | Rust | Python | TypeScript | Java |
@@ -190,7 +225,7 @@ would otherwise corrupt that integer with `JSON.parse` while merely loading the 
 "No drift" stops being a slogan the moment it becomes a test that can fail. That suite is the
 real deliverable, and it is what survives even if someone reimplements the engine.
 
-Today it is 50 cases over two schemas, asserting 15 of the spec's 19 error codes, run by three
+Today it is 68 cases over three schemas, asserting 16 of the spec's 20 error codes, run by three
 runners on three operating systems. [`conformance/README.md`](conformance/README.md) lists the
 four codes it does not reach and why, because an uncovered code should be a known gap rather
 than an oversight.
@@ -278,8 +313,10 @@ Python. This is the phase that made the thesis demonstrable rather than merely a
 **Phase 3: WebAssembly.** Browser-side validation via `wasm-bindgen`, so a frontend enforces
 the same contract as the service it calls.
 
-**Phase 4: Expanded types.** Unions and tagged variants, custom validators, string formats,
-cross-field constraints, and date/time edge cases beyond the basics.
+**Phase 4: Expanded types.** Tagged unions are *done*: a `union` with a mandatory `@tag`,
+discriminated unions in TypeScript and tag-pinned `TypedDict`s in Python, both narrowing on the
+tag. Still open: custom validators, string formats, cross-field constraints, and date/time edge
+cases beyond the basics.
 
 **Phase 5: JVM.** Via the Panama FFM API (Java 22+), not JNI. This is honestly a large lift:
 off-heap memory management, its own platform matrix, and a Java ecosystem that expects a pure
@@ -370,9 +407,10 @@ Early development, and not yet published to crates.io or PyPI. Phase 1 is done.
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a
 `number` would lie, and generated TypeScript interfaces. Both take a dict or object, or raw JSON, in one call, normalise values on
 the way out, and build nothing for an error until something reads it. The conformance suite runs
-from Rust, Python and Node against the same 50 cases, in CI, on three operating systems.
+from Rust, Python and Node against the same 68 cases, in CI, on three operating systems.
 
-**What is honest about it.** Unions, custom validators and framework integration do not exist. If you work in a single language today, pydantic or msgspec is the
+**What is honest about it.** Custom validators, string formats and framework integration do not
+exist. If you work in a single language today, pydantic or msgspec is the
 better tool and this README says so plainly further up. The reason to reach for Seam is the
 second language, and the measurement of whether it delivers is the conformance suite rather than
 anything argued here.

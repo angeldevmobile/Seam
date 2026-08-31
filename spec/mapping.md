@@ -138,7 +138,71 @@ often a stale client than a helpful one.
 Object key order does not affect validation. Error order is stable: fields in
 declaration order, then unknown keys in sorted order, depth first.
 
-## 7. Errors
+## 7. Tagged unions
+
+A `union` is a choice between declared object types, told apart by the value of
+one field:
+
+```
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+```
+
+**`@tag` is mandatory.** There is no default and no inference from the
+variants. A union that guessed which field decides would be guessing what the
+data means, which is the same mistake as reading a naive datetime as local
+time.
+
+**The tag belongs to the union, not to its variants.** A variant that declared
+the tag field itself would be a second source of truth for one value, and the
+two could disagree; the parser rejects it. Three consequences follow, and a
+binding must keep all three:
+
+1. The tag is **not** an unknown field of the variant. Reporting `unknown_field`
+   for it is non-conformant.
+2. The tag **is** carried through to the validated value. A binding that
+   returned the variant's declared fields alone would hand back an object
+   missing its own discriminant.
+3. A variant is **not** a level of nesting. An issue inside the chosen variant
+   is reported at the union's own path — `latest.amount`, never
+   `latest.created.amount`.
+
+Reading the tag:
+
+| Payload | Verdict |
+|---|---|
+| tag absent | `required`, at the tag's path |
+| tag is null | `null_not_allowed`, at the tag's path |
+| tag is not a string | `type_mismatch`, at the tag's path |
+| tag names no variant | `unknown_variant`, at the tag's path |
+| tag names a variant | the variant is validated against the same object |
+
+**An unknown variant stops there.** It is the only issue reported, even when
+the rest of the payload is also wrong. With no variant chosen there is no shape
+to check the rest against, and picking one anyway would produce a list of
+errors about a payload the caller never claimed to send.
+
+A variant must name a declared `schema`, never a built-in type and never
+another union: resolving a union of unions would need a second discriminant,
+and nothing in the payload says which one to read first.
+
+Unions and objects share one namespace. A name is declared once, as one or the
+other, and a reference names one thing.
+
+Host representation:
+
+| `.seam` | Rust | Python | TypeScript |
+|---|---|---|---|
+| `union U @tag("t")` | `enum U` | `Union[...]` of `TypedDict`, tag pinned to `Literal` | discriminated union, tag intersected in |
+
+Both generators pin the tag to a literal type, which is what lets a type
+checker narrow on it: `if (e.type === 'created')` in TypeScript and
+`if event["type"] == "created"` in Python each make the rest of the value the
+created variant, checked statically.
+
+## 8. Errors
 
 `path` and `code` are stable API. `message` is for humans and may be reworded in
 any release.
@@ -151,8 +215,8 @@ Validation reports every issue in one pass, never just the first.
 Codes: `required`, `null_not_allowed`, `type_mismatch`, `out_of_range`,
 `unsafe_integer`, `integer_too_wide`, `not_finite`, `too_short`, `too_long`, `too_few_items`,
 `too_many_items`, `not_in_enum`, `invalid_date`, `invalid_datetime`,
-`missing_timezone`, `unknown_field`, `depth_exceeded`, `size_exceeded`,
-`unknown_type`.
+`missing_timezone`, `unknown_field`, `unknown_variant`, `depth_exceeded`,
+`size_exceeded`, `unknown_type`.
 
 Adding a code is a minor change. Renaming one, removing one, or changing which
 condition produces one is breaking.

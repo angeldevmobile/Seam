@@ -30,7 +30,7 @@ from __future__ import annotations
 import datetime
 import sys
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict, Union, cast
 
 if sys.version_info >= (3, 11):
     from typing import NotRequired
@@ -116,18 +116,59 @@ def _typed_dict(described: dict[str, Any]) -> str:
         lines.append(f'    {field["name"]}: {_field_annotation(field)}')
     return "\n".join(lines)
 
+def _variant_name(union: str, variant: str, taken: set[str]) -> str:
+    """A name for the variant-with-its-tag, stepped aside if it is taken."""
+    candidate = f"{union}{variant}"
+    while candidate in taken:
+        candidate += "_"
+    return candidate
+
+def _union(described: dict[str, Any], taken: set[str]) -> str:
+    """A tagged union, as a `Union` of TypedDicts that each pin the tag.
+
+    The tag is added here rather than read off the variant, because in the
+    `.seam` file it belongs to the union: no variant may declare it. Pinning it
+    to a `Literal` is what lets a type checker narrow on it, which is the same
+    thing the TypeScript generator gets from a discriminated union.
+    """
+    tag = described["tag"]
+    name = described["name"]
+    blocks: list[str] = []
+    arms: list[str] = []
+
+    for variant in described["variants"]:
+        arm = _variant_name(name, variant["type"], taken)
+        taken.add(arm)
+        arms.append(arm)
+        blocks.append(
+            f'class {arm}({variant["type"]}):\n'
+            f'    {tag}: Literal["{variant["tag"]}"]\n'
+        )
+
+    blocks.append(f'{name} = Union[{", ".join(arms)}]\n')
+    return "\n\n".join(blocks)
+
 def generate(schema_path: Path | str) -> str:
     """Render the module source for one .seam file."""
     schema_path = Path(schema_path)
     schema = Schema.load(schema_path)
     described = schema.describe()
 
+    names = sorted(described)
+    taken = set(names)
+    objects = [n for n in names if described[n].get("kind") != "union"]
+    unions = [n for n in names if described[n].get("kind") == "union"]
+
     parts = [
         HEADER.format(source=schema_path.name, schema_file=schema_path.name),
     ]
-    for name in sorted(described):
+    # Objects first. A union's arms subclass them, and a class statement runs
+    # at import, unlike an annotation, which the header defers.
+    for name in objects:
         parts.append("\n\n" + _typed_dict(described[name]) + "\n")
-    for name in sorted(described):
+    for name in unions:
+        parts.append("\n\n" + _union(described[name], taken))
+    for name in names:
         parts.append(
             VALIDATOR.format(
                 snake=_snake(name),

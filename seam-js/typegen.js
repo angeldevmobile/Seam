@@ -75,7 +75,7 @@ function annotate(ty) {
       return 'string'
     case 'datetime':
       return 'Date'
-    case 'enum':
+    case 'enum':                    
       return ty.values.map(stringLiteral).join(' | ')
     case 'array': {
       let item = annotate(ty.item)
@@ -110,6 +110,25 @@ function iface(described) {
   for (const field of described.fields) lines.push(property(field))
   lines.push('}')
   return lines.join('\n')
+}
+
+/**
+ * A tagged union, as TypeScript's own discriminated union.
+ *
+ * The tag is intersected in rather than written on the variant, because in the
+ * .seam file it belongs to the union: no variant may declare it. What
+ * TypeScript gets in return is narrowing — `if (e.type === 'created')` makes
+ * the rest of `e` the created variant, checked by the compiler.
+ */
+function union(described) {
+  const arms = described.variants.map(
+    (v) => `  | (${v.type} & { ${key(described.tag)}: ${stringLiteral(v.tag)} })`,
+  )
+  return [`export type ${described.name} =`, ...arms].join('\n')
+}
+
+function declaration(described) {
+  return described.kind === 'union' ? union(described) : iface(described)
 }
 
 /**
@@ -154,7 +173,7 @@ function generate(schemaPath) {
   const map = mapName(source, declared)
 
   const parts = [HEADER(source, map, declared[0] ?? 'Type')]
-  for (const name of declared) parts.push(iface(described[name]))
+  for (const name of declared) parts.push(declaration(described[name]))
   parts.push(typeMap(map, source, declared))
   return parts.join('\n\n') + '\n'
 }

@@ -3,12 +3,56 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Schema {
     pub types: BTreeMap<String, ObjectType>,
+    /// Tagged unions, kept beside the object types rather than inside them.
+    /// A union is a choice between objects, not a kind of object, and the two
+    /// share one namespace: `declares` is what answers "is this name taken".
+    pub unions: BTreeMap<String, UnionType>,
 }
 
 impl Schema {
     pub fn get(&self, name: &str) -> Option<&ObjectType> {
         self.types.get(name)
     }
+
+    pub fn union(&self, name: &str) -> Option<&UnionType> {
+        self.unions.get(name)
+    }
+
+    /// Whether the name is declared at all, as either an object or a union.
+    pub fn declares(&self, name: &str) -> bool {
+        self.types.contains_key(name) || self.unions.contains_key(name)
+    }
+}
+
+/// A choice between object types, told apart by the value of one field.
+///
+/// The tag is always written down. A union that inferred which field decides,
+/// or defaulted to a conventional name, would be guessing what the data means
+/// — the same mistake as reading a naive datetime as local time.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UnionType {
+    pub name: String,
+    /// The key carrying the discriminant.
+    pub tag: String,
+    /// Declaration order, because it is the order the variants are listed in
+    /// when a payload names none of them.
+    pub variants: Vec<Variant>,
+}
+
+impl UnionType {
+    pub fn variant(&self, tag: &str) -> Option<&Variant> {
+        self.variants.iter().find(|v| v.tag == tag)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Variant {
+    /// The value of the tag field that selects this variant.
+    pub tag: String,
+    /// The object type it selects. Always a declared `schema`, never a union:
+    /// a variant that were itself a union would need a second discriminant to
+    /// resolve, and nothing in the payload says which one to read first.
+    pub type_name: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

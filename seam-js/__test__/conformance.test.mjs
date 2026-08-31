@@ -64,7 +64,7 @@ function expected(expect) {
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 50, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 68, `collected only ${CASES.length}`)
 })
 
 for (const c of CASES) {

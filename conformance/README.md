@@ -84,7 +84,7 @@ nothing.
 
 ## What this suite does not cover
 
-50 cases over two schemas, asserting 15 of the 19 codes in the mapping spec.
+68 cases over three schemas, asserting 16 of the 20 codes in the mapping spec.
 The four it does not reach, and why, because an uncovered code should be a
 known gap rather than an oversight:
 

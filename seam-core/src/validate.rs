@@ -8,7 +8,7 @@ use crate::datetime::{validate_date, validate_datetime};
 use crate::error::{Code, Issue, Path, Segment, ValidationError};
 use crate::input::{Input, Kind};
 use crate::limits::Limits;
-use crate::schema::{Field, IntType, ObjectType, Presence, Rule, Schema, Type};
+use crate::schema::{Field, IntType, ObjectType, Presence, Rule, Schema, Type, UnionType};
 use crate::value::{Int, Slot, Value};
 
 pub fn validate<I: Input>(
@@ -21,10 +21,13 @@ pub fn validate<I: Input>(
 
     match schema.get(type_name) {
         Some(ty) => v.object(ty, input, 0),
-        None => v.push(
-            Code::UnknownType,
-            format!("schema declares no type named `{type_name}`"),
-        ),
+        None => match schema.union(type_name) {
+            Some(u) => v.union(u, input, 0),
+            None => v.push(
+                Code::UnknownType,
+                format!("schema declares no type named `{type_name}`"),
+            ),
+        },
     }
 
     if v.issues.is_empty() {
@@ -95,6 +98,18 @@ impl<'a> Validator<'a> {
     }
 
     fn object<I: Input>(&mut self, ty: &'a ObjectType, input: &I, depth: usize) {
+        self.object_with(ty, input, depth, None);
+    }
+
+    /// `tag` is the one key a union has already accounted for. It is not a
+    /// field of the variant, so it must not be reported as an unknown one.
+    fn object_with<I: Input>(
+        &mut self,
+        ty: &'a ObjectType,
+        input: &I,
+        depth: usize,
+        tag: Option<&str>,
+    ) {
         if !self.depth_ok(depth) {
             return;
         }
@@ -124,7 +139,7 @@ impl<'a> Validator<'a> {
             // it is already borrowed to walk the input.
             let mut unknown = Vec::new();
             input.each_key(&mut |key| {
-                if ty.field(key).is_none() {
+                if ty.field(key).is_none() && tag != Some(key) {
                     unknown.push(key.to_string());
                 }
             });
@@ -133,6 +148,72 @@ impl<'a> Validator<'a> {
                 let message = format!("`{owner}` declares no field named `{key}`");
                 self.push_under(key, Code::UnknownField, message);
             }
+        }
+    }
+
+    /// One object, whose shape is decided by the value of its tag field.
+    ///
+    /// The tag is read first and reported at its own path. If it does not name
+    /// a variant there is nothing to check the rest of the payload against, so
+    /// that is the only issue reported: guessing a variant to keep going would
+    /// produce a list of errors about a shape the caller never claimed to send.
+    fn union<I: Input>(&mut self, u: &'a UnionType, input: &I, depth: usize) {
+        if !self.depth_ok(depth) {
+            return;
+        }
+        if input.kind() != Kind::Object {
+            self.mismatch("object", input);
+            return;
+        }
+
+        let chosen = match input.slot(&u.tag) {
+            Slot::Absent => {
+                let message = format!("`{}` decides which variant of `{}` this is", u.tag, u.name);
+                self.push_under(u.tag.clone(), Code::Required, message);
+                None
+            }
+            Slot::Null => {
+                let message = format!("the tag of `{}` cannot be null", u.name);
+                self.push_under(u.tag.clone(), Code::NullNotAllowed, message);
+                None
+            }
+            Slot::Present(value) if value.kind() != Kind::String => {
+                let message = format!("expected string, found {}", value.kind().name());
+                self.push_under(u.tag.clone(), Code::TypeMismatch, message);
+                None
+            }
+            Slot::Present(value) => match value.as_str() {
+                None => None,
+                Some(found) => match u.variant(&found) {
+                    Some(variant) => Some(variant),
+                    None => {
+                        let listed: Vec<&str> = u.variants.iter().map(|v| v.tag.as_str()).collect();
+                        let message = format!(
+                            "`{found}` is not a variant of `{}`; expected one of: {}",
+                            u.name,
+                            listed.join(", ")
+                        );
+                        self.push_under(u.tag.clone(), Code::UnknownVariant, message);
+                        None
+                    }
+                },
+            },
+        };
+
+        let Some(variant) = chosen else {
+            return;
+        };
+
+        // Bound before the mutable borrow, as in `value`.
+        let target = self.schema.get(&variant.type_name);
+        match target {
+            // Same object, same path: a variant is not a level of nesting, so
+            // an issue in it is `event.amount`, never `event.payment.amount`.
+            Some(obj) => self.object_with(obj, input, depth, Some(&u.tag)),
+            None => self.push(
+                Code::UnknownType,
+                format!("schema declares no type named `{}`", variant.type_name),
+            ),
         }
     }
 
@@ -209,10 +290,13 @@ impl<'a> Validator<'a> {
                 let target = self.schema.get(name);
                 match target {
                     Some(obj) => self.object(obj, input, depth),
-                    None => self.push(
-                        Code::UnknownType,
-                        format!("schema declares no type named `{name}`"),
-                    ),
+                    None => match self.schema.union(name) {
+                        Some(u) => self.union(u, input, depth),
+                        None => self.push(
+                            Code::UnknownType,
+                            format!("schema declares no type named `{name}`"),
+                        ),
+                    },
                 }
             }
         }

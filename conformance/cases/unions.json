@@ -1,0 +1,119 @@
+{
+  "schema": "events",
+  "type": "Feed",
+  "base": {
+    "id": 1,
+    "latest": { "type": "created", "who": "Gabriel", "amount": 5 },
+    "log": []
+  },
+  "cases": [
+    {
+      "name": "a tagged union validates against the variant its tag names",
+      "expect": "valid"
+    },
+    {
+      "name": "the other variant validates too",
+      "input": { "latest": { "type": "deleted", "who": "Gabriel" } },
+      "expect": "valid"
+    },
+    {
+      "name": "the tag is not an unknown field of the variant",
+      "note": "`Created` does not declare `type`; the union accounted for it. A binding that forgot would report unknown_field here.",
+      "input": { "latest": { "type": "created", "who": "Gabriel", "amount": 5 } },
+      "expect": "valid"
+    },
+    {
+      "name": "a missing tag is required, at the tag's own path",
+      "input": { "latest": { "who": "Gabriel", "amount": 5 } },
+      "expect": { "issues": [{ "path": "latest.type", "code": "required" }] }
+    },
+    {
+      "name": "a null tag is not allowed",
+      "input": { "latest": { "type": null, "who": "Gabriel", "amount": 5 } },
+      "expect": { "issues": [{ "path": "latest.type", "code": "null_not_allowed" }] }
+    },
+    {
+      "name": "a tag that is not a string is a type mismatch",
+      "input": { "latest": { "type": 1, "who": "Gabriel", "amount": 5 } },
+      "expect": { "issues": [{ "path": "latest.type", "code": "type_mismatch" }] }
+    },
+    {
+      "name": "a tag naming no variant is unknown_variant",
+      "input": { "latest": { "type": "archived", "who": "Gabriel" } },
+      "expect": { "issues": [{ "path": "latest.type", "code": "unknown_variant" }] }
+    },
+    {
+      "name": "an unknown variant stops there, and nothing else is reported",
+      "note": "With no variant chosen there is no shape to check the rest against, and inventing one would produce errors about a payload nobody claimed to send.",
+      "input": { "latest": { "type": "archived", "nonsense": true, "who": 42 } },
+      "expect": { "issues": [{ "path": "latest.type", "code": "unknown_variant" }] }
+    },
+    {
+      "name": "the variant's own fields are checked",
+      "input": { "latest": { "type": "created", "who": "Gabriel" } },
+      "expect": { "issues": [{ "path": "latest.amount", "code": "required" }] }
+    },
+    {
+      "name": "the variant's own rules are checked",
+      "input": { "latest": { "type": "created", "who": "", "amount": 5 } },
+      "expect": { "issues": [{ "path": "latest.who", "code": "too_short" }] }
+    },
+    {
+      "name": "a field the chosen variant does not declare is unknown",
+      "note": "`amount` belongs to `created`, not to `deleted`.",
+      "input": { "latest": { "type": "deleted", "who": "Gabriel", "amount": 5 } },
+      "expect": { "issues": [{ "path": "latest.amount", "code": "unknown_field" }] }
+    },
+    {
+      "name": "a variant is not a level of nesting",
+      "note": "The path is latest.amount, never latest.created.amount.",
+      "input": { "latest": { "type": "created", "who": "Gabriel", "amount": -1 } },
+      "expect": { "issues": [{ "path": "latest.amount", "code": "out_of_range" }] }
+    },
+    {
+      "name": "a union inside an array reports the element's own index",
+      "input": {
+        "log": [
+          { "type": "created", "who": "Gabriel", "amount": 5 },
+          { "type": "created", "who": "Gabriel" }
+        ]
+      },
+      "expect": { "issues": [{ "path": "log[1].amount", "code": "required" }] }
+    },
+    {
+      "name": "each element of an array picks its own variant",
+      "input": {
+        "log": [
+          { "type": "created", "who": "Gabriel", "amount": 5 },
+          { "type": "deleted", "who": "Gabriel", "reason": "asked" }
+        ]
+      },
+      "expect": "valid"
+    },
+    {
+      "name": "a union that is not an object is a type mismatch",
+      "input": { "latest": "created" },
+      "expect": { "issues": [{ "path": "latest", "code": "type_mismatch" }] }
+    },
+    {
+      "name": "presence applies to a union-valued field like any other",
+      "note": "`draft` is optional and nullable; `latest` is neither.",
+      "input": { "draft": null },
+      "expect": "valid"
+    },
+    {
+      "name": "a null where the union-valued field is not nullable",
+      "input": { "latest": null },
+      "expect": { "issues": [{ "path": "latest", "code": "null_not_allowed" }] }
+    },
+    {
+      "name": "a 64-bit integer inside a variant survives the boundary",
+      "note": "The union resolves before the integer is read, so nothing about the variant changes what the mapping spec already promises.",
+      "input": {
+        "latest": { "type": "created", "who": "Gabriel", "amount": 9007199254740993 }
+      },
+      "input_raw": "{\"id\": 1, \"latest\": {\"type\": \"created\", \"who\": \"Gabriel\", \"amount\": 9007199254740993}, \"log\": []}",
+      "expect": "valid"
+    }
+  ]
+}

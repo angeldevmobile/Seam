@@ -71,6 +71,8 @@ pub enum Code {
     InvalidDateTime,
     MissingTimezone,
     UnknownField,
+    /// The tag named a variant the union does not declare.
+    UnknownVariant,
     DepthExceeded,
     SizeExceeded,
     UnknownType,
@@ -95,6 +97,7 @@ impl Code {
             Code::InvalidDateTime => "invalid_datetime",
             Code::MissingTimezone => "missing_timezone",
             Code::UnknownField => "unknown_field",
+            Code::UnknownVariant => "unknown_variant",
             Code::DepthExceeded => "depth_exceeded",
             Code::SizeExceeded => "size_exceeded",
             Code::UnknownType => "unknown_type",

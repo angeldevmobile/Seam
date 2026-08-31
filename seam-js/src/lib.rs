@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 use seam_core::input::{Input, Kind};
 use seam_core::json::Ref as JsonRef;
-use seam_core::schema::{IntWidth, ObjectType, Rule, Type};
+use seam_core::schema::{IntWidth, ObjectType, Rule, Type, UnionType};
 use seam_core::value::{Int, Slot};
 
 /// Beyond this a JavaScript `number` no longer holds every integer, so a value
@@ -71,9 +71,18 @@ impl Schema {
         Schema::parse(source)
     }
 
+    /// Every declared name, objects and unions alike, sorted.
     #[napi]
     pub fn type_names(&self) -> Vec<String> {
-        self.inner.types.keys().cloned().collect()
+        let mut names: Vec<String> = self
+            .inner
+            .types
+            .keys()
+            .chain(self.inner.unions.keys())
+            .cloned()
+            .collect();
+        names.sort();
+        names
     }
 
     /// The schema as plain data, for tooling that generates types.
@@ -89,6 +98,9 @@ impl Schema {
         for (name, ty) in &self.inner.types {
             out.set(name.as_str(), describe_object(env, ty)?)?;
         }
+        for (name, u) in &self.inner.unions {
+            out.set(name.as_str(), describe_union(env, u)?)?;
+        }
         Ok(out)
     }
 
@@ -96,7 +108,7 @@ impl Schema {
     /// resolved here rather than on every call.
     #[napi]
     pub fn validator(&self, type_name: String, limits: Option<JsLimits>) -> Result<Validator> {
-        if self.inner.get(&type_name).is_none() {
+        if !self.inner.declares(&type_name) {
             return Err(Error::new(
                 Status::InvalidArg,
                 format!("schema declares no type named `{type_name}`"),
@@ -126,13 +138,6 @@ impl Validator {
 
     #[napi]
     pub fn validate<'env>(&self, env: &'env Env, payload: Unknown<'env>) -> Result<Object<'env>> {
-        let object_type = self.schema.get(&self.type_name).ok_or_else(|| {
-            Error::new(
-                Status::InvalidArg,
-                format!("schema declares no type named `{}`", self.type_name),
-            )
-        })?;
-
         // Raw JSON is read by Seam rather than by the host: `JSON.parse` would
         // already have flattened a 64-bit integer into a double, and nothing
         // afterwards brings those bits back.
@@ -143,7 +148,11 @@ impl Validator {
             return match seam_core::validate(&self.schema, &self.type_name, &root, self.limits) {
                 Err(e) => refused(env, e),
                 Ok(()) => {
-                    let value = emit_json(env, &self.schema, object_type, &root)?;
+                    // Resolved after validating, never before: for a union the
+                    // shape is whatever the tag turned out to say, and only a
+                    // payload that validated has a tag worth reading.
+                    let (ty, tag) = self.shape(&root)?;
+                    let value = emit_json(env, &self.schema, ty, &root, tag)?;
                     accepted(env, value.to_unknown())
                 }
             };
@@ -153,10 +162,23 @@ impl Validator {
         match seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
             Err(e) => refused(env, e),
             Ok(()) => {
-                let value = emit_js(env, &self.schema, object_type, &input)?;
+                let (ty, tag) = self.shape(&input)?;
+                let value = emit_js(env, &self.schema, ty, &input, tag)?;
                 accepted(env, value.to_unknown())
             }
         }
+    }
+
+    fn shape<I: Input>(&self, input: &I) -> Result<(&ObjectType, Option<&str>)> {
+        shape(&self.schema, &self.type_name, input).ok_or_else(|| {
+            Error::new(
+                Status::GenericFailure,
+                format!(
+                    "`{}` validated but its shape did not resolve",
+                    self.type_name
+                ),
+            )
+        })
     }
 }
 
@@ -220,11 +242,33 @@ fn describe_object<'env>(env: &'env Env, ty: &ObjectType) -> Result<Object<'env>
     }
 
     let mut out = Object::new(env)?;
+    // `kind` because objects and unions share one namespace: a generator
+    // reading this map has to know which of the two it is holding.
+    out.set("kind", "object")?;
     out.set("name", ty.name.as_str())?;
     out.set("denyUnknownFields", ty.deny_unknown_fields)?;
     // Declaration order, not sorted: it is the order errors are reported in,
     // and the order the generated type should read in.
     out.set("fields", fields.coerce_to_object()?)?;
+    Ok(out)
+}
+
+fn describe_union<'env>(env: &'env Env, u: &UnionType) -> Result<Object<'env>> {
+    let mut variants = env.create_array(u.variants.len() as u32)?;
+    for (i, variant) in u.variants.iter().enumerate() {
+        let mut v = Object::new(env)?;
+        v.set("tag", variant.tag.as_str())?;
+        v.set("type", variant.type_name.as_str())?;
+        variants.set(i as u32, v)?;
+    }
+
+    let mut out = Object::new(env)?;
+    out.set("kind", "union")?;
+    out.set("name", u.name.as_str())?;
+    // The field whose value decides the variant. Always written down in the
+    // `.seam` file, so a generator never has to guess it either.
+    out.set("tag", u.tag.as_str())?;
+    out.set("variants", variants.coerce_to_object()?)?;
     Ok(out)
 }
 
@@ -500,6 +544,33 @@ impl<'env> Input for JsInput<'env> {
     }
 }
 
+// -------------------------------------------------------- resolving a shape
+
+/// The object a value is actually shaped like, and the tag key to carry over.
+///
+/// For a `schema` that is fixed. For a `union` it is whatever the payload's tag
+/// says, which is why this takes the input: a union has no shape until a value
+/// picks one. Returns `None` only for a payload that did not validate, since a
+/// validated one always names a variant.
+fn shape<'s, I: Input>(
+    schema: &'s seam_core::Schema,
+    name: &str,
+    input: &I,
+) -> Option<(&'s ObjectType, Option<&'s str>)> {
+    if let Some(obj) = schema.get(name) {
+        return Some((obj, None));
+    }
+    let u: &UnionType = schema.union(name)?;
+    let found = match input.slot(&u.tag) {
+        Slot::Present(v) => v.as_str()?.into_owned(),
+        _ => return None,
+    };
+    let variant = u.variant(&found)?;
+    schema
+        .get(&variant.type_name)
+        .map(|obj| (obj, Some(u.tag.as_str())))
+}
+
 // -------------------------------------------------------------- writing JS
 
 fn emit_js<'env>(
@@ -507,8 +578,17 @@ fn emit_js<'env>(
     schema: &seam_core::Schema,
     ty: &ObjectType,
     input: &JsInput<'env>,
+    tag: Option<&str>,
 ) -> Result<Object<'env>> {
     let mut out = Object::new(env)?;
+    // The tag belongs to the union rather than to the variant, so no field
+    // would copy it. Dropping it would hand back an object whose own
+    // discriminant is missing, which is not the value that was validated.
+    if let Some(tag) = tag {
+        if let Slot::Present(v) = input.slot(tag) {
+            out.set(tag, v.value)?;
+        }
+    }
     for field in &ty.fields {
         // Absent stays absent: the property is simply not created, which is
         // what `"bio" in user` and `JSON.stringify` both read as not sent.
@@ -542,10 +622,10 @@ fn set_js<'env>(
             out.set(key, ctor.new_instance(text)?)?;
         }
         Type::Object(obj) => {
-            out.set(key, emit_js(env, schema, obj, value)?)?;
+            out.set(key, emit_js(env, schema, obj, value, None)?)?;
         }
-        Type::Ref(name) => match schema.get(name) {
-            Some(obj) => out.set(key, emit_js(env, schema, obj, value)?)?,
+        Type::Ref(name) => match shape(schema, name, value) {
+            Some((obj, tag)) => out.set(key, emit_js(env, schema, obj, value, tag)?)?,
             None => out.set(key, value.value)?,
         },
         Type::Array { item, .. } if needs_work(item, schema) => {
@@ -572,7 +652,7 @@ fn needs_work(ty: &Type, schema: &seam_core::Schema) -> bool {
         Type::DateTime | Type::Object(_) => true,
         Type::Int(i) => i.width == IntWidth::W64,
         Type::Array { item, .. } => needs_work(item, schema),
-        Type::Ref(name) => schema.get(name).is_some(),
+        Type::Ref(name) => schema.declares(name),
         _ => false,
     }
 }
@@ -582,8 +662,15 @@ fn emit_json<'env>(
     schema: &seam_core::Schema,
     ty: &ObjectType,
     r: &JsonRef<'_, '_>,
+    tag: Option<&str>,
 ) -> Result<Object<'env>> {
     let mut out = Object::new(env)?;
+    if let Some(tag) = tag {
+        if let Slot::Present(v) = r.slot(tag) {
+            let value = json_plain(env, &v)?;
+            out.set(tag, value)?;
+        }
+    }
     for field in &ty.fields {
         match r.slot(&field.name) {
             Slot::Absent => continue,
@@ -611,9 +698,9 @@ fn json_value<'env>(
                 .get_named_property::<Function<String, Unknown>>("Date")?;
             ctor.new_instance(text)
         }
-        (Type::Object(obj), _) => Ok(emit_json(env, schema, obj, r)?.to_unknown()),
-        (Type::Ref(name), _) => match schema.get(name) {
-            Some(obj) => Ok(emit_json(env, schema, obj, r)?.to_unknown()),
+        (Type::Object(obj), _) => Ok(emit_json(env, schema, obj, r, None)?.to_unknown()),
+        (Type::Ref(name), _) => match shape(schema, name, r) {
+            Some((obj, tag)) => Ok(emit_json(env, schema, obj, r, tag)?.to_unknown()),
             None => json_plain(env, r),
         },
         (Type::Array { item, .. }, Kind::Array) => {

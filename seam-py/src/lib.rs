@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use seam_core::input::{Input, Kind};
 use seam_core::json::Ref as JsonRef;
-use seam_core::schema::{ObjectType, Rule, Type};
+use seam_core::schema::{ObjectType, Rule, Type, UnionType};
 use seam_core::value::{Int, Slot};
 use seam_core::Code;
 
@@ -184,8 +184,17 @@ impl Schema {
         }
     }
 
+    /// Every declared name, objects and unions alike, sorted.
     fn type_names(&self) -> Vec<String> {
-        self.inner.types.keys().cloned().collect()
+        let mut names: Vec<String> = self
+            .inner
+            .types
+            .keys()
+            .chain(self.inner.unions.keys())
+            .cloned()
+            .collect();
+        names.sort();
+        names
     }
 
     /// The schema as plain data, for tooling that generates types.
@@ -197,6 +206,9 @@ impl Schema {
         let out = PyDict::new(py);
         for (name, ty) in &self.inner.types {
             out.set_item(name, describe_object(py, ty)?)?;
+        }
+        for (name, u) in &self.inner.unions {
+            out.set_item(name, describe_union(py, u)?)?;
         }
         Ok(out)
     }
@@ -213,7 +225,7 @@ impl Schema {
         type_name: &str,
         limits: Option<&Limits>,
     ) -> PyResult<Validator> {
-        if self.inner.get(type_name).is_none() {
+        if !self.inner.declares(type_name) {
             return Err(raise(
                 py,
                 one_issue(
@@ -309,7 +321,17 @@ impl Validator {
             return self.run_json(py, text.as_bytes());
         }
 
-        let Some(object_type) = self.schema.get(&self.type_name) else {
+        // Read in place. Nothing is copied before the rules run, so a rejected
+        // payload is never materialised at all.
+        let input = PyInput::new(payload.clone(), &self.bindings);
+
+        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
+            return Err(raise(py, e.issues));
+        }
+
+        // Resolved after validating, never before: for a union the shape is
+        // whatever the tag turned out to say.
+        let Some((object_type, tag)) = shape(&self.schema, &self.type_name, &input) else {
             return Err(raise(
                 py,
                 one_issue(
@@ -320,15 +342,11 @@ impl Validator {
             ));
         };
 
-        // Read in place. Nothing is copied before the rules run, so a rejected
-        // payload is never materialised at all.
-        let input = PyInput::new(payload.clone(), &self.bindings);
-
-        if let Err(e) = seam_core::validate(&self.schema, &self.type_name, &input, self.limits) {
-            return Err(raise(py, e.issues));
-        }
-
-        Out { py, schema: &self.schema, bindings: &self.bindings }.object(object_type, payload)
+        Out { py, schema: &self.schema, bindings: &self.bindings }.object_tagged(
+            object_type,
+            payload,
+            tag,
+        )
     }
 
     fn run_json<'py>(&self, py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyAny>> {
@@ -342,7 +360,7 @@ impl Validator {
             return Err(raise(py, e.issues));
         }
 
-        let Some(object_type) = self.schema.get(&self.type_name) else {
+        let Some((object_type, tag)) = shape(&self.schema, &self.type_name, &root) else {
             return Err(raise(
                 py,
                 one_issue(
@@ -353,8 +371,11 @@ impl Validator {
             ));
         };
 
-        Out { py, schema: &self.schema, bindings: &self.bindings }
-            .object_from_json(object_type, &root)
+        Out { py, schema: &self.schema, bindings: &self.bindings }.object_from_json(
+            object_type,
+            &root,
+            tag,
+        )
     }
 }
 
@@ -400,9 +421,31 @@ fn describe_object<'py>(py: Python<'py>, ty: &ObjectType) -> PyResult<Bound<'py,
     }
 
     let out = PyDict::new(py);
+    // `kind` because objects and unions share one namespace: a generator
+    // reading this map has to know which of the two it is holding.
+    out.set_item("kind", "object")?;
     out.set_item("name", &ty.name)?;
     out.set_item("deny_unknown_fields", ty.deny_unknown_fields)?;
     out.set_item("fields", fields)?;
+    Ok(out)
+}
+
+fn describe_union<'py>(py: Python<'py>, u: &UnionType) -> PyResult<Bound<'py, PyDict>> {
+    let variants = PyList::empty(py);
+    for variant in &u.variants {
+        let v = PyDict::new(py);
+        v.set_item("tag", &variant.tag)?;
+        v.set_item("type", &variant.type_name)?;
+        variants.append(v)?;
+    }
+
+    let out = PyDict::new(py);
+    out.set_item("kind", "union")?;
+    out.set_item("name", &u.name)?;
+    // The field whose value decides the variant. Always written down in the
+    // `.seam` file, so a generator never has to guess it either.
+    out.set_item("tag", &u.tag)?;
+    out.set_item("variants", variants)?;
     Ok(out)
 }
 
@@ -709,6 +752,30 @@ impl<'a, 'py> Input for PyInput<'a, 'py> {
 
 /// Builds the result from the payload and the schema.
 ///
+/// The object a value is actually shaped like, and the tag key to carry over.
+///
+/// For a `schema` that is fixed. For a `union` it is whatever the payload's
+/// tag says, which is why this takes the input: a union has no shape until a
+/// value picks one.
+fn shape<'s, I: Input>(
+    schema: &'s seam_core::Schema,
+    name: &str,
+    input: &I,
+) -> Option<(&'s ObjectType, Option<&'s str>)> {
+    if let Some(obj) = schema.get(name) {
+        return Some((obj, None));
+    }
+    let u: &UnionType = schema.union(name)?;
+    let found = match input.slot(&u.tag) {
+        Slot::Present(v) => v.as_str()?.into_owned(),
+        _ => return None,
+    };
+    let variant = u.variant(&found)?;
+    schema
+        .get(&variant.type_name)
+        .map(|obj| (obj, Some(u.tag.as_str())))
+}
+
 /// Only values that need converting are rebuilt. A string, an int or a bool
 /// comes back as the very object that arrived, so the common case costs a
 /// refcount instead of an allocation and a copy.
@@ -720,10 +787,27 @@ struct Out<'a, 'py> {
 
 impl<'py> Out<'_, 'py> {
     fn object(&self, ty: &ObjectType, ob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        self.object_tagged(ty, ob, None)
+    }
+
+    /// `tag` is the key a union supplied. No field would copy it, and dropping
+    /// it would hand back an object missing its own discriminant.
+    fn object_tagged(
+        &self,
+        ty: &ObjectType,
+        ob: &Bound<'py, PyAny>,
+        tag: Option<&str>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let out = PyDict::new(self.py);
         let Ok(dict) = ob.cast::<PyDict>() else {
             return Ok(out.into_any());
         };
+
+        if let Some(tag) = tag {
+            if let Ok(Some(v)) = dict.get_item(tag) {
+                out.set_item(tag, v)?;
+            }
+        }
 
         for field in &ty.fields {
             // An absent key stays absent. `"bio" in result` is how a caller
@@ -768,10 +852,12 @@ impl<'py> Out<'_, 'py> {
                 Ok(list.into_any())
             }
             Type::Object(obj) => self.object(obj, ob),
-            Type::Ref(name) => match self.schema.get(name) {
-                Some(obj) => self.object(obj, ob),
-                None => Ok(ob.clone()),
-            },
+            Type::Ref(name) => {
+                match shape(self.schema, name, &PyInput::new(ob.clone(), self.bindings)) {
+                    Some((obj, tag)) => self.object_tagged(obj, ob, tag),
+                    None => Ok(ob.clone()),
+                }
+            }
             // Nothing to convert: hand back what arrived.
             _ => Ok(ob.clone()),
         }
@@ -807,8 +893,15 @@ impl<'py> Out<'_, 'py> {
         &self,
         ty: &ObjectType,
         r: &JsonRef<'_, '_>,
+        tag: Option<&str>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let out = PyDict::new(self.py);
+        if let Some(tag) = tag {
+            if let Slot::Present(v) = r.slot(tag) {
+                let value = self.plain_json(&v)?;
+                out.set_item(tag, value)?;
+            }
+        }
         for field in &ty.fields {
             // Absent stays absent, the same as on the dict path.
             let found = match r.slot(&field.name) {
@@ -859,9 +952,9 @@ impl<'py> Out<'_, 'py> {
                 }
                 Ok(list.into_any())
             }
-            (Type::Object(obj), _) => self.object_from_json(obj, r),
-            (Type::Ref(name), _) => match self.schema.get(name) {
-                Some(obj) => self.object_from_json(obj, r),
+            (Type::Object(obj), _) => self.object_from_json(obj, r, None),
+            (Type::Ref(name), _) => match shape(self.schema, name, r) {
+                Some((obj, tag)) => self.object_from_json(obj, r, tag),
                 None => self.plain_json(r),
             },
             _ => self.plain_json(r),
@@ -923,7 +1016,7 @@ fn needs_rebuilding(ty: &Type, schema: &seam_core::Schema) -> bool {
     match ty {
         Type::Date | Type::DateTime | Type::Object(_) => true,
         Type::Array { item, .. } => needs_rebuilding(item, schema),
-        Type::Ref(name) => schema.get(name).is_some(),
+        Type::Ref(name) => schema.declares(name),
         _ => false,
     }
 }

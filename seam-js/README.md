@@ -129,6 +129,32 @@ The mapping is the one TypeScript already had words for:
 same distinction `NotRequired` draws in Python. They are independent, and a
 field may carry both.
 
+A `union` becomes a discriminated union, which is what TypeScript already had
+for exactly this:
+
+```
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+```
+
+```ts
+export type Event =
+  | (Created & { type: 'created' })
+  | (Deleted & { type: 'deleted' })
+```
+
+The tag is intersected in rather than declared on the variant, because in the
+`.seam` file it belongs to the union and no variant may declare it. What you
+get back is narrowing:
+
+```ts
+if (event.type === 'created') {
+  event.amount        // bigint, and the compiler knows it
+}
+```
+
 In CI, `--check` fails if a generated file has fallen behind its schema:
 
 ```bash

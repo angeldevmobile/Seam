@@ -1,0 +1,32 @@
+// Tagged unions.
+//
+// The tag is written down rather than inferred. A union that defaulted to a
+// conventional field name would be guessing which value decides what the
+// payload means, which is the same mistake as reading a naive datetime as
+// local time.
+//
+// Note that no variant declares `type` itself. The tag belongs to the union,
+// and a variant that declared it too would be a second source of truth for one
+// value — the parser rejects that.
+
+schema Created {
+  who:    String  @min_len(1)
+  amount: u64
+}
+
+schema Deleted {
+  who:    String  @min_len(1)
+  reason: optional String
+}
+
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+
+schema Feed {
+  id:     u64
+  latest: Event
+  log:    [Event]  @max_items(10)
+  draft:  optional Event?
+}

@@ -194,3 +194,126 @@ def test_deleting_the_generated_file_costs_only_static_checking(tmp_path):
     out.unlink()
     after = Schema.load(tmp_path / "person.seam").validate("Person", payload)
     assert before == after
+
+
+# --- tagged unions ----------------------------------------------------------
+
+UNION_SCHEMA = """
+schema Created {
+  who:    String
+  amount: u64
+}
+
+schema Deleted {
+  who:    String
+  reason: optional String
+}
+
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+
+schema Feed {
+  id:     u64
+  latest: Event
+  log:    [Event]
+}
+"""
+
+
+def render_union(tmp_path: Path) -> Path:
+    seam_file = tmp_path / "feed.seam"
+    seam_file.write_text(UNION_SCHEMA, encoding="utf-8")
+    out = tmp_path / "feed_types.py"
+    out.write_text(generate(seam_file), encoding="utf-8")
+    return out
+
+
+def test_a_union_renders_as_a_union_of_tag_pinned_typed_dicts(tmp_path):
+    body = render_union(tmp_path).read_text(encoding="utf-8")
+    assert "class EventCreated(Created):" in body
+    assert '    type: Literal["created"]' in body
+    assert "Event = Union[EventCreated, EventDeleted]" in body
+
+
+def test_the_tag_is_added_by_the_union_not_the_variant(tmp_path):
+    # `Created` carries who and amount and nothing else; the tag is the
+    # union's, and the .seam parser refuses a variant that declares it.
+    body = render_union(tmp_path).read_text(encoding="utf-8")
+    created = body[body.index("class Created"):body.index("class Deleted")]
+    assert "type" not in created
+
+
+def test_a_union_is_a_type_like_any_other(tmp_path):
+    body = render_union(tmp_path).read_text(encoding="utf-8")
+    assert "    latest: Event" in body
+    assert "    log: list[Event]" in body
+    assert "def validate_event(" in body
+
+
+@needs_mypy
+def test_the_generated_union_module_type_checks(tmp_path):
+    result = mypy(render_union(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@needs_mypy
+def test_mypy_narrows_on_the_tag(tmp_path):
+    # The point of pinning the tag to a Literal: checking it tells the type
+    # checker which variant this is.
+    render_union(tmp_path)
+    user = tmp_path / "use_it.py"
+    user.write_text(
+        textwrap.dedent(
+            """
+            from feed_types import validate_event
+
+            event = validate_event({})
+            if event["type"] == "created":
+                amount: int = event["amount"]
+                print(amount)
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = mypy(user)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@needs_mypy
+def test_mypy_refuses_a_variant_field_without_narrowing(tmp_path):
+    render_union(tmp_path)
+    user = tmp_path / "use_it.py"
+    user.write_text(
+        textwrap.dedent(
+            """
+            from feed_types import validate_event
+
+            event = validate_event({})
+            amount: int = event["amount"]
+            """
+        ),
+        encoding="utf-8",
+    )
+    assert mypy(user).returncode != 0
+
+
+@needs_mypy
+def test_mypy_refuses_the_wrong_variant_after_narrowing(tmp_path):
+    render_union(tmp_path)
+    user = tmp_path / "use_it.py"
+    user.write_text(
+        textwrap.dedent(
+            """
+            from feed_types import validate_event
+
+            event = validate_event({})
+            if event["type"] == "deleted":
+                amount: int = event["amount"]
+                print(amount)
+            """
+        ),
+        encoding="utf-8",
+    )
+    assert mypy(user).returncode != 0

@@ -284,3 +284,100 @@ test('deleting the generated file costs only static checking', () => {
   const after = Schema.load(seam).validate('Person', payload)
   assert.deepEqual(before, after)
 })
+
+// --- tagged unions ----------------------------------------------------------
+
+const UNION_SCHEMA = `
+schema Created {
+  who:    String
+  amount: u64
+}
+
+schema Deleted {
+  who:    String
+  reason: optional String
+}
+
+union Event @tag("type") {
+  created: Created
+  deleted: Deleted
+}
+
+schema Feed {
+  id:     u64
+  latest: Event
+  log:    [Event]
+}
+`
+
+function unionProject() {
+  const dir = mkdtempSync(join(tmpdir(), 'seam-typegen-union-'))
+  const seam = join(dir, 'feed.seam')
+  writeFileSync(seam, UNION_SCHEMA, 'utf8')
+  writeFileSync(join(dir, 'feed.types.ts'), generate(seam), 'utf8')
+  return { dir, seam, body: readFileSync(join(dir, 'feed.types.ts'), 'utf8') }
+}
+
+const USE_UNION = `
+import { Schema } from 'seam'
+import type { FeedTypes, Event } from './feed.types'
+
+const schema = Schema.load<FeedTypes>('feed.seam')
+const event: Event = schema.validator('Event').validate(new Uint8Array())
+`
+
+function checkUnion(body) {
+  const { dir } = unionProject()
+  writeFileSync(join(dir, 'use_it.ts'), body, 'utf8')
+  return tsc(dir, ['feed.types.ts', 'use_it.ts'])
+}
+
+test('a union renders as a TypeScript discriminated union', () => {
+  const { body } = unionProject()
+  assert.match(body, /export type Event =\n {2}\| \(Created & \{ type: 'created' \}\)\n {2}\| \(Deleted & \{ type: 'deleted' \}\)/)
+})
+
+test('the tag is intersected in, because no variant may declare it', () => {
+  const { body } = unionProject()
+  // `Created` carries who and amount and nothing else; the tag is the union's.
+  assert.match(body, /export interface Created \{\n {2}who: string\n {2}amount: bigint\n\}/)
+})
+
+test('a union is a type like any other in the map and in a field', () => {
+  const { body } = unionProject()
+  assert.match(body, /^ {2}Event: Event$/m)
+  assert.match(body, /^ {2}latest: Event$/m)
+  assert.match(body, /^ {2}log: Event\[\]$/m)
+})
+
+test('tsc narrows on the tag', () => {
+  // The whole point of emitting a discriminated union rather than a bare
+  // intersection: checking the tag tells the compiler which variant this is.
+  const result = checkUnion(`${USE_UNION}
+if (event.type === 'created') {
+  const amount: bigint = event.amount
+  void amount
+}
+`)
+  assert.ok(result.ok, result.output)
+})
+
+test('tsc refuses a variant field read without narrowing', () => {
+  const result = checkUnion(`${USE_UNION}\nconst amount: bigint = event.amount\n`)
+  assert.ok(!result.ok)
+})
+
+test('tsc refuses the wrong variant after narrowing', () => {
+  const result = checkUnion(`${USE_UNION}
+if (event.type === 'deleted') {
+  const amount: bigint = event.amount
+  void amount
+}
+`)
+  assert.ok(!result.ok)
+})
+
+test('tsc refuses a tag the union does not declare', () => {
+  const result = checkUnion(`${USE_UNION}\nif (event.type === 'archived') { }\n`)
+  assert.ok(!result.ok)
+})

@@ -2,7 +2,10 @@
 //!
 //! ```text
 //! file        := declaration*
-//! declaration := "schema" ident "{" field* "}"
+//! declaration := object | union
+//! object      := "schema" ident "{" field* "}"
+//! union       := "union" ident "@tag" "(" string ")" "{" variant* "}"
+//! variant     := value ":" ident
 //! field       := ident ":" "optional"? type rule*
 //! type        := base "?"?
 //! base        := ident | "[" type "]" | enum
@@ -11,7 +14,9 @@
 //! rule        := "@" ident "(" args ")"
 //! ```
 
-use crate::schema::{Field, IntType, IntWidth, ObjectType, Presence, Rule, Schema, Type};
+use crate::schema::{
+    Field, IntType, IntWidth, ObjectType, Presence, Rule, Schema, Type, UnionType, Variant,
+};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +36,7 @@ impl std::error::Error for ParseError {}
 
 pub fn parse(source: &str) -> Result<Schema, ParseError> {
     let tokens = lex(source)?;
-    let mut p = Parser { toks: tokens, pos: 0, refs: Vec::new() };
+    let mut p = Parser { toks: tokens, pos: 0, refs: Vec::new(), variant_refs: Vec::new() };
     let schema = p.file()?;
     p.resolve(&schema)?;
     Ok(schema)
@@ -232,6 +237,9 @@ struct Parser {
     /// Type references, checked once the whole file is known so that a schema
     /// may refer to one declared later.
     refs: Vec<(String, usize, usize)>,
+    /// `(union, tag field, variant type, line, column)`, checked in the same
+    /// pass and for the same reason.
+    variant_refs: Vec<(String, String, String, usize, usize)>,
 }
 
 impl Parser {
@@ -324,17 +332,110 @@ impl Parser {
     fn file(&mut self) -> Result<Schema, ParseError> {
         let mut schema = Schema::default();
         while !self.at(&Tok::Eof) {
+            if self.at_keyword("union") {
+                let (name, union) = self.union_declaration()?;
+                // One namespace: an object and a union cannot share a name,
+                // because a reference names one thing.
+                if schema.declares(&name) {
+                    return self.error(format!("`{name}` is declared more than once"));
+                }
+                schema.unions.insert(name, union);
+                continue;
+            }
             if !self.at_keyword("schema") {
                 let found = self.cur().tok.describe();
-                return self.error(format!("expected `schema`, found {found}"));
+                return self.error(format!("expected `schema` or `union`, found {found}"));
             }
             let (name, ty) = self.declaration()?;
-            if schema.types.contains_key(&name) {
+            if schema.declares(&name) {
                 return self.error(format!("`{name}` is declared more than once"));
             }
             schema.types.insert(name, ty);
         }
         Ok(schema)
+    }
+
+    fn union_declaration(&mut self) -> Result<(String, UnionType), ParseError> {
+        self.bump(); // `union`
+        let name = self.expect_ident("a union name")?;
+
+        // `@tag` is required. A union that defaulted to a conventional field
+        // name would be guessing which value decides what the payload means,
+        // and the whole point of the file is that nothing is guessed.
+        let at = self.cur().clone();
+        if !self.eat(&Tok::At) {
+            let found = at.tok.describe();
+            return self.error(format!(
+                "`{name}` needs `@tag(\"...\")` naming the field that decides the variant, found {found}"
+            ));
+        }
+        let attribute = self.expect_ident("`tag`")?;
+        if attribute != "tag" {
+            return Err(ParseError {
+                line: at.line,
+                column: at.column,
+                message: format!("unknown union attribute `@{attribute}`, expected `@tag`"),
+            });
+        }
+        self.expect(&Tok::LParen)?;
+        let tag = match &self.cur().tok {
+            Tok::Str(s) | Tok::Ident(s) => s.clone(),
+            other => {
+                let found = other.describe();
+                return self.error(format!("expected the tag field's name, found {found}"));
+            }
+        };
+        self.bump();
+        if tag.is_empty() {
+            return self.error("the tag field's name cannot be empty".into());
+        }
+        self.expect(&Tok::RParen)?;
+
+        self.expect(&Tok::LBrace)?;
+        let mut variants: Vec<Variant> = Vec::new();
+        while !self.at(&Tok::RBrace) && !self.at(&Tok::Eof) {
+            let value = match &self.cur().tok {
+                Tok::Ident(s) | Tok::Str(s) => s.clone(),
+                other => {
+                    let found = other.describe();
+                    return self.error(format!("expected a variant tag value, found {found}"));
+                }
+            };
+            self.bump();
+            self.expect(&Tok::Colon)?;
+
+            let t = self.cur().clone();
+            let type_name = self.expect_ident("a schema name")?;
+            if builtin(&type_name).is_some() {
+                return Err(ParseError {
+                    line: t.line,
+                    column: t.column,
+                    message: format!(
+                        "a variant must be a declared `schema`, and `{type_name}` is a built-in type"
+                    ),
+                });
+            }
+            if variants.iter().any(|v| v.tag == value) {
+                return self.error(format!("`{name}` lists the tag `{value}` twice"));
+            }
+            // Recorded so the second pass can check it, and check that the
+            // object it names does not itself declare the tag field.
+            self.variant_refs.push((
+                name.clone(),
+                tag.clone(),
+                type_name.clone(),
+                t.line,
+                t.column,
+            ));
+            variants.push(Variant { tag: value, type_name });
+        }
+        self.expect(&Tok::RBrace)?;
+
+        if variants.is_empty() {
+            return self.error(format!("`{name}` needs at least one variant"));
+        }
+
+        Ok((name.clone(), UnionType { name, tag, variants }))
     }
 
     fn declaration(&mut self) -> Result<(String, ObjectType), ParseError> {
@@ -474,7 +575,7 @@ impl Parser {
 
     fn resolve(&self, schema: &Schema) -> Result<(), ParseError> {
         for (name, line, column) in &self.refs {
-            if !schema.types.contains_key(name) {
+            if !schema.declares(name) {
                 return Err(ParseError {
                     line: *line,
                     column: *column,
@@ -482,6 +583,33 @@ impl Parser {
                 });
             }
         }
+
+        for (union, tag, type_name, line, column) in &self.variant_refs {
+            let err = |message: String| ParseError { line: *line, column: *column, message };
+
+            let Some(object) = schema.types.get(type_name) else {
+                return Err(err(if schema.unions.contains_key(type_name) {
+                    // Allowing this would need a second discriminant, and
+                    // nothing in the payload says which one to read first.
+                    format!(
+                        "`{type_name}` is a union, and a variant of `{union}` must be a `schema`"
+                    )
+                } else {
+                    format!("unknown type `{type_name}`")
+                }));
+            };
+
+            // The tag is supplied by the union and consumed while validating,
+            // so a variant declaring it too would create two sources of truth
+            // for one value, which could then disagree.
+            if object.field(tag).is_some() {
+                return Err(err(format!(
+                    "`{type_name}` declares `{tag}`, which is the tag `{union}` uses; \
+                     the tag belongs to the union, not to its variants"
+                )));
+            }
+        }
+
         Ok(())
     }
 }
@@ -628,7 +756,10 @@ schema User {
             err("schema A {").message,
             "expected `}`, found end of input"
         );
-        assert_eq!(err("A { }").message, "expected `schema`, found `A`");
+        assert_eq!(
+            err("A { }").message,
+            "expected `schema` or `union`, found `A`"
+        );
     }
 
     #[test]
