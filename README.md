@@ -301,6 +301,12 @@ serialization true.
 ## Safe
 
 - **Memory safety** from the core outward: no hand-written C, no manual buffer arithmetic.
+- **The parsers are fuzzed.** Both readers are written by hand, so a deterministic, seeded fuzzer
+  runs against them on every push: two million mutated inputs, asserting only that nothing
+  unwinds. Rejecting an input is a correct answer and accepting one is a correct answer; panicking
+  is not, because it crosses into a runtime that cannot catch it. A failure prints the seed that
+  reproduces it, and inputs that once broke something stay in a regression list that runs in
+  milliseconds.
 - **No panics cross the FFI boundary.** A failure surfaces as `ValidationError` in Python and
   `SeamValidationError` in JS. A panic reaching a foreign runtime is treated as a Seam bug.
 - **Schemas are declarative data, not executable code.** Loading a `.seam` file cannot run

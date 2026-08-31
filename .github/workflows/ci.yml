@@ -29,6 +29,19 @@ jobs:
       - run: cargo test --locked --all-targets
       - run: cargo test --locked --doc
 
+  # The engine reads untrusted bytes with hand-written parsers, and the README
+  # promises a panic never reaches a foreign runtime. The short run is part of
+  # `cargo test`; this one goes wider on every push, because the whole point of
+  # a fuzzer is the inputs nobody thought of.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --release --test fuzz
+        env:
+          SEAM_FUZZ_ITERATIONS: 2000000
+
   msrv:
     runs-on: ubuntu-latest
     steps:
