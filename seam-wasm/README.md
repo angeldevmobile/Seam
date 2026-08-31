@@ -91,18 +91,25 @@ What a browser downloads, measured by `npm run size`:
 
 | file | raw | gzip | brotli |
 |---|---:|---:|---:|
-| `seam_wasm_bg.wasm` | 113.9 KiB | 56.6 KiB | 49.4 KiB |
-| glue | 16.3 KiB | 3.8 KiB | 3.4 KiB |
-| wrapper | 6.7 KiB | 2.7 KiB | 2.2 KiB |
-| **total** | **137.0 KiB** | **63.1 KiB** | **55.0 KiB** |
+| `seam_wasm_bg.wasm` | 129.1 KiB | 64.7 KiB | 56.2 KiB |
+| glue | 16.7 KiB | 4.0 KiB | 3.5 KiB |
+| wrapper | 7.1 KiB | 2.8 KiB | 2.3 KiB |
+| **total** | **152.9 KiB** | **71.6 KiB** | **62.0 KiB** |
 
-The engine is a `.seam` parser, a JSON parser and a validator, and it carries
-no dependencies. Rerun the script rather than trusting the table.
+The engine is a `.seam` parser, a JSON parser, a validator and five string
+formats, and it carries no dependencies. Rerun the script rather than trusting
+the table.
 
-The build runs `wasm-opt -Oz`, which takes the module from 128.2 KiB to 113.9,
-an 11% cut. Compressed it is worth about 1.8%, because brotli was already
-finding most of that redundancy — worth doing, not worth quoting as the
-headline it looks like.
+The build runs `wasm-opt -Oz`. On the module before formats it cut 128.2 KiB to
+113.9, an 11% saving that was worth about 1.8% compressed, because brotli was
+already finding most of that redundancy — worth doing, not the headline it
+looks like.
+
+**The five formats cost about 7 KiB brotli**, which is the number to weigh
+against a general `@pattern`. A linear regex engine is two orders of magnitude
+more than that in a browser bundle, and a backtracking one would break the
+bound on hostile input. Seven kilobytes for the cases people actually write is
+the trade this project takes.
 
 ## Status
 

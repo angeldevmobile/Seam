@@ -303,6 +303,10 @@ fn describe_rules<'env>(env: &'env Env, rules: &[Rule]) -> Result<Object<'env>> 
                 r.set("rule", "max_items")?;
                 r.set("value", *n as f64)?;
             }
+            Rule::Format(f) => {
+                r.set("rule", "format")?;
+                r.set("value", f.name())?;
+            }
             Rule::Range { min, max } => {
                 r.set("rule", "range")?;
                 r.set("min", BigInt::from(*min))?;

@@ -101,7 +101,7 @@ function codesOf(found) {
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 78, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 95, `collected only ${CASES.length}`)
 })
 
 for (const c of CASES) {

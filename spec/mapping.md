@@ -107,6 +107,41 @@ UTF-8. `@min_len` and `@max_len` count **Unicode scalar values**, not bytes and
 not UTF-16 code units — so a string's length is the same number in every
 binding, which is the only property that makes the constraint portable.
 
+### 5.1 Formats
+
+`@format(name)` states what a string *is*. The set of names is closed:
+
+| name | Accepted | Deliberately not checked |
+|---|---|---|
+| `uuid` | `8-4-4-4-12` hex, either case, any version and variant | that the version bits are meaningful |
+| `email` | one `@`, a non-empty local part, a dotted hostname domain | RFC 5322 quoting and comments; deliverability |
+| `hostname` | RFC 1123 labels: alphanumerics and hyphens, 1–63 each, 253 total | that the name resolves |
+| `ipv4` | four decimal octets, no leading zeros | that the address is routable |
+| `ipv6` | full form, one `::` elision, optional trailing IPv4 | zone identifiers (`%eth0`) |
+
+A value that fails is `invalid_format`.
+
+**There is no `@pattern`, and adding one would be a breaking change to the
+security model rather than a feature.** A backtracking regular expression lets
+a hostile schema or a hostile payload burn unbounded time, which contradicts
+§10; a linear engine means the core's first dependency, carried into every
+host including a browser bundle. A closed set costs neither, and a name
+survives someone tightening the definition later in a way a copied pattern
+does not.
+
+Two rules follow from the table's second column, and a binding must keep both:
+
+1. **A format is structural, never a lookup.** Nothing here touches the
+   network or a registry. A validator that resolved a hostname at a boundary
+   would make validation depend on something outside the payload.
+2. **A format that rejects a legitimate value is worse than no format.** The
+   failure lands on a user holding a perfectly good address, so where a
+   definition is contested the looser reading wins. That is why `email` is not
+   RFC 5322.
+
+Formats compose with the length rules, and every rule on a field is checked:
+`@format(hostname) @min_len(3)` can report both, in declaration order.
+
 ## 6. Objects and arrays
 
 An array element has two states, a value or null, so only nullability applies to
@@ -243,7 +278,7 @@ Validation reports every issue in one pass, never just the first.
 
 Codes: `required`, `null_not_allowed`, `type_mismatch`, `out_of_range`,
 `unsafe_integer`, `integer_too_wide`, `not_finite`, `too_short`, `too_long`, `too_few_items`,
-`too_many_items`, `not_in_enum`, `invalid_date`, `invalid_datetime`,
+`too_many_items`, `not_in_enum`, `invalid_format`, `invalid_date`, `invalid_datetime`,
 `missing_timezone`, `unknown_field`, `unknown_variant`, `depth_exceeded`,
 `size_exceeded`, `unknown_type`.
 

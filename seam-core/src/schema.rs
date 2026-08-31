@@ -1,3 +1,4 @@
+use crate::format::Format;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -202,9 +203,15 @@ impl IntType {
 pub enum Rule {
     MinLen(usize),
     MaxLen(usize),
-    Range { min: i128, max: i128 },
+    Range {
+        min: i128,
+        max: i128,
+    },
     MinItems(usize),
     MaxItems(usize),
+    /// A named shape the string must have. Never a regular expression: see
+    /// [`crate::format`] for why that is the design and not an omission.
+    Format(Format),
 }
 
 #[cfg(test)]

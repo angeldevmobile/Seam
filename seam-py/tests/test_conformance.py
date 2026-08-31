@@ -103,4 +103,4 @@ def test_case(name, schema_name, type_name, payload, expect, limits):
 
 
 def test_the_suite_is_not_empty():
-    assert len(CASES) >= 78, f"expected a meaningful suite, collected {len(CASES)}"
+    assert len(CASES) >= 95, f"expected a meaningful suite, collected {len(CASES)}"

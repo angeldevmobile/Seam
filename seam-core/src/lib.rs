@@ -21,6 +21,7 @@
 
 pub mod datetime;
 pub mod error;
+pub mod format;
 pub mod input;
 pub mod json;
 pub mod limits;
@@ -30,6 +31,7 @@ pub mod validate;
 pub mod value;
 
 pub use error::{Code, Issue, Path, Segment, ValidationError};
+pub use format::Format;
 pub use limits::Limits;
 pub use parser::parse;
 pub use schema::{Field, IntType, IntWidth, ObjectType, Presence, Rule, Schema, Type};

@@ -56,7 +56,7 @@ fn every_case_in_the_suite_holds() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert!(ran >= 78, "expected a meaningful suite, ran only {ran}");
+    assert!(ran >= 95, "expected a meaningful suite, ran only {ran}");
 }
 
 /// A harness that cannot fail proves nothing, so check that it can.

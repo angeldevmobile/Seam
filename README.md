@@ -76,6 +76,7 @@ schema User {
   id:          u64
   name:        String            @min_len(3) @max_len(64)
   age:         u32               @range(18..=120)
+  contact:     String            @format(email)
   plan:        enum { free, pro, enterprise }
   tags:        [String]          @max_items(10)
 
@@ -335,8 +336,18 @@ object, because `JSON.parse` has already corrupted the value by then.
 
 **Phase 4: Expanded types.** Tagged unions are *done*: a `union` with a mandatory `@tag`,
 discriminated unions in TypeScript and tag-pinned `TypedDict`s in Python, both narrowing on the
-tag. Still open: custom validators, string formats, cross-field constraints, and date/time edge
-cases beyond the basics.
+tag. String formats are done too: `@format(uuid)`, `email`, `hostname`, `ipv4`, `ipv6`, as a closed
+set of names rather than a regex, so no pattern can burn unbounded time and the engine keeps its
+zero dependencies. Still open: date/time edge cases beyond the basics.
+
+*Custom validators are no longer on this list, and neither are general cross-field constraints.*
+Both need an expression language, and the "Safe" section above promises there is none: a schema
+is data, so loading one from an untrusted source is a parsing problem rather than a sandboxing
+problem. That promise is worth more than the feature. What a caller actually wants from a custom
+validator is business logic, which belongs in the host, after Seam has guaranteed the shape it
+runs on. Where a cross-field rule is common enough to earn a name it can get one — a closed
+vocabulary like `@requires(other)` states the relationship without evaluating anything — but
+never an expression.
 
 **Phase 5: JVM.** Via the Panama FFM API (Java 22+), not JNI. This is honestly a large lift:
 off-heap memory management, its own platform matrix, and a Java ecosystem that expects a pure

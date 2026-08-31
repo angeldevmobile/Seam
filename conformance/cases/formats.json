@@ -1,0 +1,101 @@
+{
+  "schema": "account",
+  "type": "Account",
+  "base": {
+    "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "contact": "gabriel@example.com",
+    "host": "api.example.com"
+  },
+  "cases": [
+    { "name": "well-formed values pass every format", "expect": "valid" },
+    {
+      "name": "a malformed uuid is invalid_format",
+      "input": { "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c" },
+      "expect": { "issues": [{ "path": "id", "code": "invalid_format" }] }
+    },
+    {
+      "name": "a uuid without dashes is not a uuid",
+      "input": { "id": "6ba7b8109dad11d180b400c04fd430c8" },
+      "expect": { "issues": [{ "path": "id", "code": "invalid_format" }] }
+    },
+    {
+      "name": "any uuid version and variant is accepted",
+      "note": "Those bits say who generated it, not whether the value is a UUID.",
+      "input": { "id": "00000000-0000-0000-0000-000000000000" },
+      "expect": "valid"
+    },
+    {
+      "name": "an address with no at-sign is not an email",
+      "input": { "contact": "gabriel.example.com" },
+      "expect": { "issues": [{ "path": "contact", "code": "invalid_format" }] }
+    },
+    {
+      "name": "an email needs a dotted domain",
+      "note": "A domain with no dot is syntactically fine and never routable from outside its own network, which at an API boundary is a typo every time.",
+      "input": { "contact": "gabriel@localhost" },
+      "expect": { "issues": [{ "path": "contact", "code": "invalid_format" }] }
+    },
+    {
+      "name": "a plus tag and subdomains are accepted",
+      "note": "Rejecting these is the classic over-strict email check, and it lands on a user holding a perfectly good address.",
+      "input": { "contact": "first.last+tag@sub.example.co.uk" },
+      "expect": "valid"
+    },
+    {
+      "name": "a space in the local part is refused",
+      "input": { "contact": "first last@example.com" },
+      "expect": { "issues": [{ "path": "contact", "code": "invalid_format" }] }
+    },
+    {
+      "name": "a hostname label may not start or end with a hyphen",
+      "input": { "host": "-api.example.com" },
+      "expect": { "issues": [{ "path": "host", "code": "invalid_format" }] }
+    },
+    {
+      "name": "an empty hostname label is refused",
+      "input": { "host": "api..example.com" },
+      "expect": { "issues": [{ "path": "host", "code": "invalid_format" }] }
+    },
+    {
+      "name": "an octet above 255 is not an ipv4 address",
+      "input": { "ip": "256.0.0.1" },
+      "expect": { "issues": [{ "path": "ip", "code": "invalid_format" }] }
+    },
+    {
+      "name": "a leading zero in an octet is refused",
+      "note": "010 is octal to some resolvers and decimal to others, and a value that means two different things on two hosts is what this project exists to refuse.",
+      "input": { "ip": "010.0.0.1" },
+      "expect": { "issues": [{ "path": "ip", "code": "invalid_format" }] }
+    },
+    {
+      "name": "the ipv6 short form and an embedded ipv4 are accepted",
+      "input": { "v6": "::ffff:192.168.0.1" },
+      "expect": "valid"
+    },
+    {
+      "name": "two elisions are not an ipv6 address",
+      "input": { "v6": "2001:db8::85a3::7334" },
+      "expect": { "issues": [{ "path": "v6", "code": "invalid_format" }] }
+    },
+    {
+      "name": "an ipv6 zone identifier is refused",
+      "note": "It names an interface on one machine and means nothing on another.",
+      "input": { "v6": "fe80::1%eth0" },
+      "expect": { "issues": [{ "path": "v6", "code": "invalid_format" }] }
+    },
+    {
+      "name": "a format and a length bound both apply, in declaration order",
+      "input": { "label": "-x" },
+      "expect": {
+        "issues": [
+          { "path": "label", "code": "invalid_format" },
+          { "path": "label", "code": "too_short" }
+        ]
+      }
+    },
+    {
+      "name": "a format says nothing about a field that is absent",
+      "expect": "valid"
+    }
+  ]
+}

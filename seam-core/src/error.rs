@@ -67,6 +67,8 @@ pub enum Code {
     TooFewItems,
     TooManyItems,
     NotInEnum,
+    /// The string did not have the shape its `@format` names.
+    InvalidFormat,
     InvalidDate,
     InvalidDateTime,
     MissingTimezone,
@@ -93,6 +95,7 @@ impl Code {
             Code::TooFewItems => "too_few_items",
             Code::TooManyItems => "too_many_items",
             Code::NotInEnum => "not_in_enum",
+            Code::InvalidFormat => "invalid_format",
             Code::InvalidDate => "invalid_date",
             Code::InvalidDateTime => "invalid_datetime",
             Code::MissingTimezone => "missing_timezone",

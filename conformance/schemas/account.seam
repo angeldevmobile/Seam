@@ -1,0 +1,17 @@
+// Named string formats.
+//
+// There is no `@pattern(...)` and there will not be one. A backtracking regex
+// lets a hostile schema or payload burn unbounded time, which breaks the
+// promise that input is bounded; a linear one means the engine's first
+// dependency and its weight in every host, including a browser bundle. A
+// closed set of names costs neither, and says what a value *is* rather than
+// what it looks like.
+
+schema Account {
+  id:      String            @format(uuid)
+  contact: String            @format(email)
+  host:    String            @format(hostname)
+  ip:      optional String   @format(ipv4)
+  v6:      optional String   @format(ipv6)
+  label:   optional String   @format(hostname) @min_len(3)
+}

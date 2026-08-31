@@ -37,9 +37,10 @@ Where they differ, and it matters
   and no reordering of this benchmark makes it so.
 * **seam** range-checks `id` against `u64` because width is part of its type.
   The other two treat `id` as an unbounded `int` and do no such check.
-* **seam** currently materialises the payload into an intermediate
-  `seam_core::Value` before validating. That copy is the main thing this
-  benchmark exists to price.
+* **seam** reads the payload in place. It used to copy it into an intermediate
+  `seam_core::Value` first, and pricing that copy is why this benchmark was
+  written; the `Input` trait removed it, so what is left being measured is the
+  cost of a schema that is read at runtime rather than fixed at compile time.
 """
 
 from __future__ import annotations

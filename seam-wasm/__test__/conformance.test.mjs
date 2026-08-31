@@ -124,7 +124,7 @@ for (const c of CASES) {
 }
 
 test('the suite is not empty', () => {
-  assert.ok(CASES.length >= 78, `collected only ${CASES.length}`)
+  assert.ok(CASES.length >= 95, `collected only ${CASES.length}`)
 })
 
 test('the harness detects a wrong expectation', async () => {

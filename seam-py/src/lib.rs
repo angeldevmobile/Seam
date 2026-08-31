@@ -415,6 +415,10 @@ fn describe_object<'py>(py: Python<'py>, ty: &ObjectType) -> PyResult<Bound<'py,
                     r.set_item("rule", "max_items")?;
                     r.set_item("value", n)?;
                 }
+                Rule::Format(f) => {
+                    r.set_item("rule", "format")?;
+                    r.set_item("value", f.name())?;
+                }
                 Rule::Range { min, max } => {
                     r.set_item("rule", "range")?;
                     r.set_item("min", min)?;

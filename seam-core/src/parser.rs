@@ -12,8 +12,10 @@
 //! enum        := "enum" "{" value ("," value)* ","? "}"
 //! value       := ident | string
 //! rule        := "@" ident "(" args ")"
+//! format      := "@format" "(" name ")"      // a closed set, never a regex
 //! ```
 
+use crate::format::Format;
 use crate::schema::{
     Field, IntType, IntWidth, ObjectType, Presence, Rule, Schema, Type, UnionType, Variant,
 };
@@ -541,6 +543,34 @@ impl Parser {
             "max_len" => Rule::MaxLen(self.count(&name)?),
             "min_items" => Rule::MinItems(self.count(&name)?),
             "max_items" => Rule::MaxItems(self.count(&name)?),
+            "format" => {
+                let at = self.cur().clone();
+                let value = match &self.cur().tok {
+                    Tok::Ident(s) | Tok::Str(s) => s.clone(),
+                    other => {
+                        let found = other.describe();
+                        return self.error(format!("expected a format name, found {found}"));
+                    }
+                };
+                self.bump();
+                match Format::parse(&value) {
+                    Some(f) => Rule::Format(f),
+                    None => {
+                        // The set is closed on purpose. Naming what is
+                        // available beats leaving the author to guess, and
+                        // guessing is what a regex would have invited.
+                        let names: Vec<&str> = Format::ALL.iter().map(|f| f.name()).collect();
+                        return Err(ParseError {
+                            line: at.line,
+                            column: at.column,
+                            message: format!(
+                                "unknown format `{value}`, expected one of: {}",
+                                names.join(", ")
+                            ),
+                        });
+                    }
+                }
+            }
             "range" => {
                 let min = self.expect_int()?;
                 self.expect(&Tok::RangeIncl)?;

@@ -434,6 +434,16 @@ impl<'a> Validator<'a> {
                         }
                     }
                 }
+                Rule::Format(f) => {
+                    // Only a string can have a format; anything else already
+                    // reported a type_mismatch and does not need a second
+                    // complaint about the same value.
+                    if let Some(s) = input.as_str() {
+                        if !f.matches(&s) {
+                            self.push(Code::InvalidFormat, format!("not a valid {}", f.name()));
+                        }
+                    }
+                }
                 Rule::MinItems(n) => {
                     if input.kind() == Kind::Array && input.len() < *n {
                         self.push(
