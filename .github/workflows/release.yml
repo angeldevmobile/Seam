@@ -231,7 +231,7 @@ jobs:
           npm ci
           npx napi create-npm-dirs
           npx napi artifacts --output-dir artifacts
-          npx napi pre-publish --no-gh-release
+          npx napi pre-publish
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
