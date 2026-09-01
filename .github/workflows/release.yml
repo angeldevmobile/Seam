@@ -123,6 +123,18 @@ jobs:
         with:
           name: node-${{ matrix.target }}
           path: seam-js/*.node
+      # `native.js` and `native.d.ts` are written by `napi build` and are the
+      # same on every platform, so one of them uploads it. Without this the
+      # publish job has no way to produce them: it only downloads binaries, and
+      # a package missing its own loader fails on `require`.
+      - name: the JS glue, once
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-glue
+          path: |
+            seam-js/native.js
+            seam-js/native.d.ts
 
   # WebAssembly is the one artefact that is the same everywhere, so it is built
   # once rather than in a matrix.
@@ -174,7 +186,18 @@ jobs:
         with:
           name: wasm
           path: seam-wasm/wasm
-      - run: npm ci && npm run build
+      # Assembled from the artefacts, not rebuilt. A gate that rebuilds is
+      # testing a package the release never produces, which is how a missing
+      # `native.js` reached npm in 0.1.0.
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-glue
+          path: seam-js
+      - uses: actions/download-artifact@v4
+        with:
+          name: node-x86_64-unknown-linux-gnu
+          path: seam-js
+      - run: npm ci
         working-directory: seam-js
       - run: node scripts/packaging-smoke.mjs
 
@@ -234,7 +257,15 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: node-*
+          name: node-glue
+          path: seam-js
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-x86_64-*
+          path: seam-js/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-aarch64-*
           path: seam-js/artifacts
       - name: npm, seam-schema
         working-directory: seam-js
