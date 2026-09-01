@@ -3,7 +3,7 @@
 **One schema. Every language. No drift.**
 
 Seam is a cross-language data contract: you write the schema once in a `.seam` file, and
-Python, Node and the browser with the JVM to come all validate against the *same compiled
+Python, Node and the browser (with the JVM to come) all validate against the *same compiled
 engine*, with the same rules, the same errors, and the same answers on the cases that usually
 break.
 
@@ -17,7 +17,7 @@ There is no generated mirror type to keep in sync. There is no second validator 
 | **Browser** | `seam-schema-wasm` | WebAssembly, 55 KiB brotli, bytes only |
 | **JVM** | — | planned, via Panama |
 
-Not published to any registry yet see [Installing](#installing) for what that means today.
+Not published to any registry yet; see [Installing](#installing) for what that means today.
 
 ---
 
@@ -217,7 +217,9 @@ Two opinionated calls fall out of this, and Seam makes them explicitly:
 
 ## Installing
 
-Nothing is on a registry yet. When it is, this is what it will look like:
+Nothing is on a registry yet — the packaging and the release pipeline are ready, the accounts
+are not. [`RELEASING.md`](RELEASING.md) has what is left. When it is published, this is what it
+will look like:
 
 ```bash
 cargo add seam-core       # Rust: the engine

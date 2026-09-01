@@ -1,0 +1,247 @@
+name: Release
+
+# Publishing cannot be undone. crates.io never deletes, and on npm and PyPI the
+# version number is burnt whether or not the artefact was any good. So this
+# workflow has two ways in:
+#
+#   - `workflow_dispatch` with `publish: false` — the rehearsal. Builds every
+#     artefact on every platform, runs the packaging smoke test against what it
+#     built, and stops. Nothing leaves the runner. Run this before tagging.
+#   - a `v*` tag — the real thing. Same build, same smoke test, then publish.
+#
+# The steps are identical up to the last one on purpose: a rehearsal that took
+# a different path would be rehearsing something else.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Actually publish. Leave false to rehearse."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  WASM_BINDGEN_VERSION: "0.2.127"
+
+jobs:
+  # A tag that disagrees with the manifests would publish a version nobody
+  # meant. Cheap to check, and it fails before anything is built.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "version=$manifest" >> "$GITHUB_OUTPUT"
+          echo "manifests declare $manifest"
+
+          for f in seam-js/Cargo.toml seam-py/Cargo.toml seam-wasm/Cargo.toml; do
+            got=$(grep -m1 '^version' "$f" | cut -d'"' -f2)
+            [ "$got" = "$manifest" ] || { echo "::error::$f says $got, workspace says $manifest"; exit 1; }
+          done
+          for f in seam-js/package.json seam-wasm/package.json; do
+            got=$(node -p "require('./$f').version")
+            [ "$got" = "$manifest" ] || { echo "::error::$f says $got, workspace says $manifest"; exit 1; }
+          done
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            [ "$tag" = "$manifest" ] || { echo "::error::tag v$tag does not match $manifest"; exit 1; }
+          fi
+
+  # One wheel per platform: `abi3` means it covers 3.9 upwards, so the matrix
+  # is over operating systems rather than over interpreter versions.
+  wheels:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-py
+      - run: pip install maturin
+      - run: maturin build --release --target ${{ matrix.target }} --out dist --manifest-path seam-py/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: dist/*.whl
+
+  # The native module, one per platform, as napi's per-platform packages.
+  node-binaries:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-js
+      - run: npm ci
+        working-directory: seam-js
+      - run: npx napi build --platform --release --target ${{ matrix.target }} --js native.js --dts native.d.ts
+        working-directory: seam-js
+      - run: npm test
+        working-directory: seam-js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.target }}
+          path: seam-js/*.node
+
+  # WebAssembly is the one artefact that is the same everywhere, so it is built
+  # once rather than in a matrix.
+  wasm:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seam-wasm
+      - run: cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+      - run: npm ci
+        working-directory: seam-wasm
+      - run: npm run build
+        working-directory: seam-wasm
+      - run: npx playwright install --with-deps chromium
+        working-directory: seam-wasm
+      - run: npm test
+        working-directory: seam-wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: seam-wasm/wasm/
+
+  # The gate. Everything built above is installed from its packaged form into a
+  # scratch directory outside the checkout, and used. A rehearsal ends here,
+  # having proved the same thing a real release proves before it publishes.
+  smoke:
+    needs: [version, wheels, node-binaries, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install maturin
+      - run: cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: seam-wasm/wasm
+      - run: npm ci && npm run build
+        working-directory: seam-js
+      - run: node scripts/packaging-smoke.mjs
+
+  publish:
+    needs: [version, smoke]
+    # A rehearsal stops before this. The tag path is the only one that reaches
+    # a registry without somebody asking for it explicitly.
+    if: github.ref_type == 'tag' || inputs.publish
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+
+      # The engine first: the bindings are useless without it, and it is the
+      # one that cannot be yanked if the others turn out wrong.
+      - name: crates.io
+        run: cargo publish --manifest-path seam-core/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - name: PyPI
+        # Trusted publishing: no token to leak or rotate. Configure the
+        # publisher on PyPI against this repository and workflow first.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-*
+          path: seam-js/artifacts
+      - name: npm, seam-schema
+        working-directory: seam-js
+        run: |
+          set -euo pipefail
+          npm ci
+          npx napi create-npm-dirs
+          npx napi artifacts --output-dir artifacts
+          npx napi pre-publish --no-gh-release
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: seam-wasm/wasm
+      - name: npm, seam-schema-wasm
+        working-directory: seam-wasm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
