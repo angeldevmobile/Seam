@@ -113,7 +113,14 @@ the trade this project takes.
 
 ## Status
 
-Early development, not yet on npm. Build from a checkout:
+```bash
+npm install seam-schema-wasm
+```
+
+Early development, published at `0.1.1`. One `.wasm`, the same on every
+platform, so unlike the native packages there is nowhere it does not run.
+
+Build from a checkout:
 
 ```bash
 rustup target add wasm32-unknown-unknown

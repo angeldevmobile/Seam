@@ -11,13 +11,11 @@ There is no generated mirror type to keep in sync. There is no second validator 
 
 | language | package | status |
 |---|---|---|
-| **Rust** | `seam-core` | the engine itself |
-| **Python** | `seam-schema` | 3.9+, one `abi3` wheel per platform, generated `TypedDict`s |
-| **Node** | `seam-schema` | 20+, native module, `bigint` for 64-bit, generated TypeScript |
-| **Browser** | `seam-schema-wasm` | WebAssembly, 55 KiB brotli, bytes only |
+| **Rust** | [`seam-core`](https://crates.io/crates/seam-core) | the engine itself |
+| **Python** | [`seam-schema`](https://pypi.org/project/seam-schema/) | 3.9+, one `abi3` wheel per platform, generated `TypedDict`s |
+| **Node** | [`seam-schema`](https://www.npmjs.com/package/seam-schema) | 20+, native module, `bigint` for 64-bit, generated TypeScript |
+| **Browser** | [`seam-schema-wasm`](https://www.npmjs.com/package/seam-schema-wasm) | WebAssembly, 55 KiB brotli, bytes only |
 | **JVM** | — | planned, via Panama |
-
-Not published to any registry yet; see [Installing](#installing) for what that means today.
 
 ---
 
@@ -217,18 +215,18 @@ Two opinionated calls fall out of this, and Seam makes them explicitly:
 
 ## Installing
 
-Nothing is on a registry yet — the packaging and the release pipeline are ready, the accounts
-are not. [`RELEASING.md`](RELEASING.md) has what is left. When it is published, this is what it
-will look like:
-
 ```bash
-cargo add seam-core       # Rust: the engine
-pip install seam-schema   # Python 3.9+
-npm install seam-schema   # Node 20+
+cargo add seam-core            # Rust: the engine
+pip install seam-schema        # Python 3.9+
+npm install seam-schema        # Node 20+
 npm install seam-schema-wasm   # browsers
 ```
 
-Until then, from a checkout. Each binding builds on its own and needs its own toolchain:
+The native packages ship binaries for Linux x64, macOS ARM and Windows x64. On any other
+platform `pip install` and `npm install` fail rather than falling back, because there is no pure
+implementation to fall back to; `seam-schema-wasm` runs anywhere and is the answer there.
+
+From a checkout, if you would rather build it. Each binding needs its own toolchain:
 
 ```bash
 git clone https://github.com/angeldevmobile/Seam
@@ -490,8 +488,12 @@ If you work in one language, use the native tool. Seam is for the seam between t
 
 ## Status
 
-Early development, and not yet published to any registry. Phases 1 through 3 are done, and
-phase 4 is partly done: tagged unions and string formats exist, date/time edge cases do not.
+Early development, published at `0.1.1`. Phases 1 through 3 are done, and phase 4 is partly
+done: tagged unions and string formats exist, date/time edge cases do not.
+
+`0.x` means the contract can still move, which is what [`spec/`](spec/) says of itself: nothing
+is frozen until 1.0. Within `0.x`, a renamed or removed error code is breaking and bumps the
+minor.
 
 **What works today.** A `.seam` file parses, compiles and validates. Python gets an `abi3` wheel
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a

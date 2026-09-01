@@ -13,23 +13,39 @@ They go out in one version, together, because the conformance suite only means
 anything if every binding is the same engine. A binding released against an
 older `seam-core` would be exactly the drift this project exists to prevent.
 
-## Before the first release, once
+## The accounts, already set up
 
-These are account-level things nobody can do from a checkout.
+Done for `0.1.0`, recorded here because each one has a way of expiring.
 
-1. **crates.io** — a token with publish rights, stored as the
-   `CARGO_REGISTRY_TOKEN` repository secret. Verify `seam-core` is still
-   unclaimed; names can be taken between now and then.
-2. **PyPI** — configure a *trusted publisher* for this repository and the
-   `release.yml` workflow. Trusted publishing uses a short-lived OIDC token, so
-   there is nothing to store, leak or rotate. This is why the workflow asks for
-   `id-token: write`.
-3. **npm** — an automation token as the `NPM_TOKEN` secret. It must be able to
-   publish `seam-schema`, `seam-schema-wasm`, and the three per-platform
-   packages napi creates (`seam-schema-linux-x64-gnu`,
-   `seam-schema-darwin-arm64`, `seam-schema-win32-x64-msvc`).
-4. **A `release` environment** in the repository settings, so the publishing job
-   can be held for approval. The workflow already targets it.
+1. **crates.io** — a token with `publish-new` and `publish-update`, stored as
+   the `CARGO_REGISTRY_TOKEN` secret. **It expires**; when it does, the release
+   fails on authentication and the fix is a new token, not a code change.
+2. **PyPI** — a *trusted publisher* for `angeldevmobile/Seam`, workflow
+   `release.yml`, environment `release`. No token: PyPI accepts a short-lived
+   OIDC token minted per run, which is why the workflow asks for
+   `id-token: write`. Nothing here expires.
+3. **npm** — a granular token with *bypass 2FA*, as the `NPM_TOKEN` secret,
+   covering all packages because the five did not exist when it was made.
+   **It expires, and it is also on a deadline**: npm is restricting tokens that
+   bypass 2FA, with direct publishing cut off in January 2027. See *Migrating
+   npm to trusted publishing* below.
+4. **A `release` environment** with required reviewers, so publishing waits for
+   an approval instead of firing on its own.
+
+## Migrating npm to trusted publishing
+
+Not optional past January 2027, and possible now that the packages exist —
+npm has no equivalent of PyPI's "pending publisher", so the first release had
+to use a token.
+
+For each of the five packages (`seam-schema`, `seam-schema-wasm`, and the three
+per-platform ones), configure a trusted publisher on npmjs.com pointing at
+`angeldevmobile/Seam`, workflow `release.yml`, environment `release`. Then drop
+`NODE_AUTH_TOKEN` from the workflow and revoke the token. Requires npm CLI
+11.5.1 or later on the runner.
+
+Doing this removes the last credential that can leak, and the last one that
+expires.
 
 ## Every release
 
@@ -90,6 +106,40 @@ The tag triggers the same build and the same smoke test, and then publishes:
 crates.io first, because the bindings are useless without the engine and it is
 the one that cannot be yanked once others depend on it, then PyPI, then the two
 npm packages.
+
+**Each publish is skipped when that version is already on its registry.** A
+release that fails halfway leaves some registries done and others not, and the
+only sane fix is re-running it — which works only if republishing an existing
+version is a no-op rather than an error. `0.1.0` failed twice this way before
+that was true: once on an unverified crates.io email, once on a flag.
+
+Re-running is also the one thing to get right when a release fails: use
+**Run workflow** from `main`, not *Re-run failed jobs*. A re-run replays the
+original commit, so it will not contain the fix you just pushed.
+
+## What 0.1.0 taught, at the cost of a broken version
+
+`seam-schema@0.1.0` reached npm without `native.js`, the loader that `index.js`
+requires on its first line. It threw on `require` for anyone who installed it.
+Every test was green.
+
+The direct cause was small: `napi build` writes `native.js`, and the publish
+job never runs it — it only downloads `.node` binaries. The real cause was the
+gate. `scripts/packaging-smoke.mjs` ran after `npm run build`, so it packed a
+directory that had the file and tested a package **the release never produces**.
+
+> A gate that rebuilds the artefact is not testing the artefact.
+
+Two things changed, and both are worth keeping:
+
+- The smoke job assembles `seam-js` from the same artefacts the publish job
+  uses, and does not build.
+- The contents of each tarball are asserted before installing it, so a missing
+  file fails loudly rather than at somebody else's `require`.
+
+That assertion was verified in both directions: with `native.js` removed the
+smoke test fails and says *"do not publish"*. A check that has never been seen
+to fail is not known to work.
 
 ## Why the rehearsal exists
 

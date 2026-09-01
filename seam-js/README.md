@@ -163,9 +163,18 @@ npx seam typegen --check contracts/*.seam
 
 ## Status
 
-Early development, not yet on npm. **Node 20 or newer**: the compiled module
-targets Node-API 6 and would run on 18, but the build tool needs 20, and a
-version nothing tests is not a version this claims to support.
+```bash
+npm install seam-schema
+```
+
+Early development, published at `0.1.1`. **Node 20 or newer**: the compiled
+module targets Node-API 6 and would run on 18, but the build tool needs 20, and
+a version nothing tests is not a version this claims to support.
+
+Binaries ship for Linux x64, macOS ARM and Windows x64. On any other platform
+the install fails rather than falling back, because there is nothing to fall
+back to; [`seam-schema-wasm`](https://www.npmjs.com/package/seam-schema-wasm)
+runs anywhere.
 
 Build from a checkout:
 

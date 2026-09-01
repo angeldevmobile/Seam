@@ -88,7 +88,16 @@ seam typegen --check contracts/*.seam   # fails if stale or missing
 
 ## Status
 
-Early development, not yet on PyPI. Build from a checkout:
+```bash
+pip install seam-schema
+```
+
+Early development, published at `0.1.1`. One `abi3` wheel per platform covers
+Python 3.9 and up. Wheels ship for Linux x64, macOS ARM and Windows x64; on any
+other platform the install fails rather than falling back, because there is
+nothing to fall back to.
+
+Build from a checkout:
 
 ```bash
 pip install ./seam-py
