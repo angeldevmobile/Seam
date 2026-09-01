@@ -203,8 +203,19 @@ jobs:
 
       # The engine first: the bindings are useless without it, and it is the
       # one that cannot be yanked if the others turn out wrong.
+      # Each publish below is skipped when that version is already on the
+      # registry. A release that fails halfway leaves some registries done and
+      # others not, and the fix for that is re-running it — which only works if
+      # re-publishing an existing version is a no-op rather than an error.
       - name: crates.io
-        run: cargo publish --manifest-path seam-core/Cargo.toml
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          if curl -sf -A seam-release "https://crates.io/api/v1/crates/seam-core/$v" > /dev/null; then
+            echo "seam-core $v is already published, skipping"
+          else
+            cargo publish --manifest-path seam-core/Cargo.toml
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -219,6 +230,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -228,10 +240,18 @@ jobs:
         working-directory: seam-js
         run: |
           set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          if npm view "seam-schema@$v" version > /dev/null 2>&1; then
+            echo "seam-schema $v is already published, skipping"
+            exit 0
+          fi
           npm ci
           npx napi create-npm-dirs
           npx napi artifacts --output-dir artifacts
-          npx napi pre-publish
+          # `--no-gh-release` is required, not redundant: `pre-publish` calls
+          # `createGhRelease` by default and then fails looking for a release
+          # commit that a normal commit message does not match.
+          npx napi pre-publish --no-gh-release
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -242,6 +262,13 @@ jobs:
           path: seam-wasm/wasm
       - name: npm, seam-schema-wasm
         working-directory: seam-wasm
-        run: npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          if npm view "seam-schema-wasm@$v" version > /dev/null 2>&1; then
+            echo "seam-schema-wasm $v is already published, skipping"
+            exit 0
+          fi
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
