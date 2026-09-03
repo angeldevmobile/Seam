@@ -117,7 +117,7 @@ the trade this project takes.
 npm install seam-schema-wasm
 ```
 
-Early development, published at `0.1.1`. One `.wasm`, the same on every
+Early development, published at `0.1.2`. One `.wasm`, the same on every
 platform, so unlike the native packages there is nowhere it does not run.
 
 Build from a checkout:

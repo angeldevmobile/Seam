@@ -222,9 +222,11 @@ npm install seam-schema        # Node 20+
 npm install seam-schema-wasm   # browsers
 ```
 
-The native packages ship binaries for Linux x64, macOS ARM and Windows x64. On any other
-platform `pip install` and `npm install` fail rather than falling back, because there is no pure
-implementation to fall back to; `seam-schema-wasm` runs anywhere and is the answer there.
+The native packages ship binaries for Linux x64, macOS ARM and Windows x64. Linux means glibc
+2.17 and up — `manylinux2014`, so Ubuntu 14.04 onwards, Debian 8 onwards, RHEL 7 onwards — and
+not musl, so not Alpine. On any other platform `pip install` and `npm install` fail rather than
+falling back, because there is no pure implementation to fall back to; `seam-schema-wasm` runs
+anywhere and is the answer there.
 
 From a checkout, if you would rather build it. Each binding needs its own toolchain:
 
@@ -488,7 +490,7 @@ If you work in one language, use the native tool. Seam is for the seam between t
 
 ## Status
 
-Early development, published at `0.1.1`. Phases 1 through 3 are done, and phase 4 is partly
+Early development, published at `0.1.2`. Phases 1 through 3 are done, and phase 4 is partly
 done: tagged unions and string formats exist, date/time edge cases do not.
 
 `0.x` means the contract can still move, which is what [`spec/`](spec/) says of itself: nothing

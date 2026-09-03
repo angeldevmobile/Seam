@@ -97,6 +97,13 @@ node scripts/packaging-smoke.mjs
 
 ### 4. Tag
 
+Tag last, and tag `main` as it stands — including the README changes. A tag is
+the only version of the source anyone can fetch by name, so a doc fix landed
+after it is a fix nobody who checks out `v<version>` will read. `v0.1.1` was
+tagged one commit before the README stopped saying the project was unpublished,
+which is exactly the sentence someone arriving at that tag most needed to be
+right.
+
 ```bash
 git tag v<version>
 git push origin v<version>

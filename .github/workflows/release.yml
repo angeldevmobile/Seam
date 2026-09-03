@@ -67,12 +67,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # A plain `maturin build` on the runner tags the wheel for whatever
+          # glibc the runner happens to have. That is how 0.1.1 shipped
+          # `manylinux_2_34`: installable on Ubuntu 22.04 and RHEL 9, and on
+          # nothing older, while the README promised "Linux x64". Linking
+          # through zig against 2.17 makes the floor a decision instead of a
+          # side effect of the image, and `--compatibility` fails the build if
+          # the result ever links a symbol newer than that.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            maturin: "maturin[zig]"
+            extra: "--zig --compatibility manylinux2014"
           - os: macos-latest
             target: aarch64-apple-darwin
+            maturin: "maturin"
+            extra: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            maturin: "maturin"
+            extra: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -83,8 +96,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: seam-py
-      - run: pip install maturin
-      - run: maturin build --release --target ${{ matrix.target }} --out dist --manifest-path seam-py/Cargo.toml
+      - run: pip install "${{ matrix.maturin }}"
+      - run: maturin build --release --target ${{ matrix.target }} --out dist --manifest-path seam-py/Cargo.toml ${{ matrix.extra }}
+      # `--compatibility` is checked by maturin against the symbols it linked,
+      # but the filename is what pip actually matches on, and a wheel tagged
+      # too high is invisible rather than broken: pip reports "no matching
+      # distribution" and the platform looks unsupported. So assert the tag.
+      - name: the tag has to be the one the README promises
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          whl=$(ls dist/*.whl)
+          echo "built $whl"
+          case "$whl" in
+            *manylinux_2_17_x86_64*|*manylinux2014_x86_64*) ;;
+            *) echo "::error::$whl is not manylinux2014; it would exclude glibc < 2.17 hosts"; exit 1 ;;
+          esac
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.target }}
