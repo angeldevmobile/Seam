@@ -103,11 +103,11 @@ dependencies = [
 
 [[package]]
 name = "seam-core"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "seam-py"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pyo3",
  "seam-core",

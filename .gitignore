@@ -21,6 +21,9 @@ dist/
 node_modules/
 *.node
 
+# Written by `napi create-npm-dirs` on every build and publish.
+seam-js/npm/
+
 .vscode/
 .idea/
 *.bak
