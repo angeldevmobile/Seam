@@ -56,6 +56,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo metadata --locked --format-version 1 > /dev/null
+      # The three bindings are `exclude`d from the workspace, so each keeps its
+      # own lockfile and the check above never opens any of them. `v0.1.2`
+      # shipped with all three still naming 0.1.1: nothing was broken by it,
+      # because maturin and cargo rewrite the lockfile as they build, but a
+      # lockfile that only becomes correct during the build is not locked.
+      - run: cargo metadata --locked --format-version 1 --manifest-path seam-py/Cargo.toml > /dev/null
+      - run: cargo metadata --locked --format-version 1 --manifest-path seam-js/Cargo.toml > /dev/null
+      - run: cargo metadata --locked --format-version 1 --manifest-path seam-wasm/Cargo.toml > /dev/null
 
   # seam-js is outside the workspace, so it needs its own lint pass.
   node-lint:

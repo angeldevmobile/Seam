@@ -223,9 +223,29 @@ jobs:
           path: seam-js
       - uses: actions/download-artifact@v4
         with:
-          name: node-x86_64-unknown-linux-gnu
-          path: seam-js
+          pattern: node-x86_64-*
+          path: seam-js/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-aarch64-*
+          path: seam-js/artifacts
       - run: npm ci
+        working-directory: seam-js
+      # The same three commands `publish` runs, minus the publishing. They are
+      # what turns a checkout into the thing npm receives: `pre-publish` writes
+      # `optionalDependencies` into `package.json` and moves each binary into
+      # its per-platform package. Without them the smoke packs a shape nobody
+      # installs, and the fallback in `native.js` -- now the only way a binary
+      # is ever found -- goes untested right up to the moment it is published.
+      #
+      # `--skip-optional-publish` is what keeps this a rehearsal: `pre-publish`
+      # pushes the per-platform packages to npm otherwise, and this job runs on
+      # the rehearsal path too.
+      - run: npx napi create-npm-dirs
+        working-directory: seam-js
+      - run: npx napi artifacts --output-dir artifacts
+        working-directory: seam-js
+      - run: npx napi pre-publish --skip-optional-publish --no-gh-release
         working-directory: seam-js
       - run: node scripts/packaging-smoke.mjs
 

@@ -42,7 +42,6 @@
     "typegen.js",
     "cli.js",
     "native.js",
-    "native.d.ts",
-    "*.node"
+    "native.d.ts"
   ]
 }

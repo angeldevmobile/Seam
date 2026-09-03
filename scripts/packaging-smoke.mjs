@@ -20,7 +20,7 @@
 //     node scripts/packaging-smoke.mjs
 
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -147,18 +147,107 @@ await check('PyPI / seam-schema', async (dir) => {
 
 //   Node                       -
 
-await check('npm / seam-schema', async (dir) => {
-  const packed = run('npm', ['pack', '--pack-destination', dir], {
-    cwd: join(ROOT, 'seam-js'),
-    shell: IS_WINDOWS,
-  })
-  const tarball = packed.trim().split(/\r?\n/).pop()
+// What npm actually receives is not what a checkout contains. `napi
+// pre-publish` writes `optionalDependencies` into `package.json` and moves each
+// binary into its per-platform package, and only then does `npm publish` run.
+// So the published `seam-schema` carries no binary of its own: `native.js`
+// falls through to requiring `seam-schema-<triple>`.
+//
+// Packing the checkout as-is tests none of that. It passes on a `.node` sitting
+// next to `index.js` and a `package.json` with no optional dependencies at all
+// -- a shape no user ever installs. That is the same blind spot that let 0.1.0
+// out: a gate looking at something adjacent to the artefact.
+//
+// So the package is staged the way the release stages it, and the fallback is
+// what gets exercised.
+function stageNpmPackage(js) {
+  const npmDir = join(js, 'npm')
+  if (!existsSync(npmDir)) run('npx', ['napi', 'create-npm-dirs'], { cwd: js, shell: IS_WINDOWS })
 
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'consumer', private: true }), 'utf8')
+  // The per-platform package this host would resolve to, found the way npm
+  // finds it, rather than by re-deriving napi's triple naming here.
+  const triple = readdirSync(npmDir).find((t) => {
+    const meta = JSON.parse(readFileSync(join(npmDir, t, 'package.json'), 'utf8'))
+    return meta.os?.includes(process.platform) && meta.cpu?.includes(process.arch)
+  })
+  if (!triple) throw new Error(`no per-platform package targets ${process.platform}-${process.arch}`)
+
+  const binary = JSON.parse(readFileSync(join(npmDir, triple, 'package.json'), 'utf8')).main
+  if (!existsSync(join(npmDir, triple, binary))) {
+    // The release job stages all three from downloaded artefacts and lets
+    // `napi pre-publish` place them. A checkout has only the one it just
+    // built, so place that one.
+    if (!existsSync(join(js, binary))) {
+      throw new Error(`no ${binary} in seam-js or npm/${triple}: run \`npm run build\` there first`)
+    }
+    copyFileSync(join(js, binary), join(npmDir, triple, binary))
+  }
+
+  // Same reason: after `pre-publish` these are already written. Without it
+  // they are not, and packing now would produce a package that cannot resolve
+  // a binary at all.
+  const pkgPath = join(js, 'package.json')
+  const original = readFileSync(pkgPath, 'utf8')
+  const pkg = JSON.parse(original)
+  let restore = null
+  if (!pkg.optionalDependencies) {
+    pkg.optionalDependencies = Object.fromEntries(
+      readdirSync(npmDir).map((t) => [
+        JSON.parse(readFileSync(join(npmDir, t, 'package.json'), 'utf8')).name,
+        pkg.version,
+      ]),
+    )
+    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+    restore = () => writeFileSync(pkgPath, original, 'utf8')
+  }
+
+  return { triple, binary, platformDir: join(npmDir, triple), restore }
+}
+
+await check('npm / seam-schema', async (dir) => {
+  const js = join(ROOT, 'seam-js')
+  const { triple, binary, platformDir, restore } = stageNpmPackage(js)
+
+  let tarball
+  let platformTarball
+  try {
+    const packedPlatform = run('npm', ['pack', '--pack-destination', dir], {
+      cwd: platformDir,
+      shell: IS_WINDOWS,
+    })
+    platformTarball = join(dir, packedPlatform.trim().split(/\r?\n/).pop())
+
+    const packed = run('npm', ['pack', '--pack-destination', dir], { cwd: js, shell: IS_WINDOWS })
+    tarball = packed.trim().split(/\r?\n/).pop()
+  } finally {
+    if (restore) restore()
+  }
+
+  // `overrides` because the version under test is by definition not on the
+  // registry yet, and an optional dependency npm cannot fetch is one it skips
+  // in silence -- the install would succeed and `require` would throw, which
+  // is precisely the 0.1.0 failure. Only the main tarball is installed:
+  // passing the platform one too would make it a direct dependency, which npm
+  // rejects as EOVERRIDE and which is an install shape no consumer has.
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({
+      name: 'consumer',
+      private: true,
+      overrides: { [`seam-schema-${triple}`]: `file:${platformTarball}` },
+    }),
+    'utf8',
+  )
   run('npm', ['install', '--no-audit', '--no-fund', join(dir, tarball)], {
     cwd: dir,
     shell: IS_WINDOWS,
   })
+
+  const strays = readdirSync(join(dir, 'node_modules', 'seam-schema')).filter((f) => f.endsWith('.node'))
+  if (strays.length) throw new Error(`seam-schema ships binaries of its own again: ${strays.join(', ')}`)
+  if (!existsSync(join(dir, 'node_modules', `seam-schema-${triple}`, binary))) {
+    throw new Error(`the ${triple} package did not provide ${binary}`)
+  }
 
   const script = join(dir, 'use_it.cjs')
   writeFileSync(
