@@ -19,6 +19,29 @@ There is no generated mirror type to keep in sync. There is no second validator 
 
 ---
 
+## See it break, then see it not
+
+[**seam-demo**](https://github.com/angeldevmobile/seam-demo) is a Python service that sends an
+order and a Node consumer that reads it. The order ID arrives **off by 83**, nothing throws, and
+every system downstream now disagrees with the database — because `id` is a snowflake and
+`JSON.parse` cannot hold an integer past 2^53.
+
+```
+  JSON.parse                              seam-schema
+  ─────────────────────────────           ─────────────────────────────
+  Python sent   1847559241284567891       Python sent   1847559241284567891
+  Node received 1847559241284567800       Node received 1847559241284567891
+  off by        83                        off by        0
+  typeof id     number                    typeof id     bigint
+  threw         nothing                   threw         nothing
+```
+
+The same `.seam` file drives all of it: the Python producer, the Node and TypeScript consumers,
+and a browser page running the engine as WebAssembly. Nobody restates the contract, which is the
+only reason the four cannot drift apart.
+
+---
+
 ## The problem is not validation. It's the boundary.
 
 Every language already has a good validator. Pydantic, Zod, Valibot and Jakarta Bean Validation
@@ -227,6 +250,18 @@ The native packages ship binaries for Linux x64, macOS ARM and Windows x64. Linu
 not musl, so not Alpine. On any other platform `pip install` and `npm install` fail rather than
 falling back, because there is no pure implementation to fall back to; `seam-schema-wasm` runs
 anywhere and is the answer there.
+
+On npm the binary lives in a per-platform package — `seam-schema-linux-x64-gnu` and its two
+siblings — which `seam-schema` pulls in as an optional dependency. That is what keeps the
+package you install at 13 KB instead of 1 MB of binaries for machines you are not on. Two
+consequences worth knowing before they bite:
+
+- **`npm install --no-optional` produces a package that cannot load.** So does a private
+  registry or an allowlist that mirrors `seam-schema` without its platform packages. The error
+  says npm has a bug and suggests deleting `package-lock.json`; when the cause is either of
+  these, it does not.
+- The lockfile records all three platform packages. That is npm working as intended, not
+  bloat: it is what lets a Linux CI and a Mac laptop install from one lockfile.
 
 From a checkout, if you would rather build it. Each binding needs its own toolchain:
 
