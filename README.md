@@ -404,6 +404,9 @@ serialization true.
 - **Stable error contract.** `path`, `code`, and `message` are public API. `code` is a stable
   machine-readable identifier and changes only on a major version.
 
+[SECURITY.md](SECURITY.md) says which of these are vulnerabilities rather than bugs, where the
+known limits are, and how to report one privately.
+
 ## Scope
 
 Seam is deliberately narrow. It is **not** a replacement for Protobuf, OpenAPI, or serde. It
@@ -530,7 +533,8 @@ done: tagged unions and string formats exist, date/time edge cases do not.
 
 `0.x` means the contract can still move, which is what [`spec/`](spec/) says of itself: nothing
 is frozen until 1.0. Within `0.x`, a renamed or removed error code is breaking and bumps the
-minor.
+minor. [CHANGELOG.md](CHANGELOG.md) records what has moved so far, including the two releases
+that can break an install that was working.
 
 **What works today.** A `.seam` file parses, compiles and validates. Python gets an `abi3` wheel
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a
