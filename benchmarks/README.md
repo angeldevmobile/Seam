@@ -133,7 +133,7 @@ For scale, a pure-Python dict comprehension over the same six keys costs about
 
 ## Progress
 
-### 1. Bind the validator once — done
+### 1. Bind the validator once (done)
 
 `schema.validator("User")` resolves the type, the `datetime` classes and the
 limits at bind time instead of per call. Measured with `ab.py`, interleaved:
@@ -153,7 +153,7 @@ data there is.
 `schema.validate(type, payload)` still exists and still works; it now builds a
 validator and discards it, which is exactly the "unbound" column above.
 
-### 2. Validate directly against the host's objects — done
+### 2. Validate directly against the host's objects (done)
 
 `seam-core::validate` is generic over an `Input` trait. `Value` implements it,
 and `seam-py` implements it for `Bound<'py, PyAny>`, so no intermediate copy is
@@ -179,7 +179,7 @@ objects and their attributes costs more than validating six fields. Seam's error
 contract is richer than msgspec's message string, and this is its price;
 building the issues lazily is the obvious lever and has not been tried.
 
-### 3. Stop paying for the error path on the happy path — done
+### 3. Stop paying for the error path on the happy path (done)
 
 Two changes, measured separately.
 
@@ -199,7 +199,7 @@ keys.
 
 Together the flat row went from roughly 2 800 to roughly 1 900 ns.
 
-### 4. Build validation issues lazily — done
+### 4. Build validation issues lazily (done)
 
 Measured on a two-field schema, valid versus rejected in the same process:
 
@@ -211,14 +211,14 @@ A bare `raise`/`except` of a Python exception with no attributes costs 206 ns on
 this machine, so what remains above that floor is now about 395 ns.
 
 The exception is declared in Python and overrides no `__init__`, so raising it
-is C-level bookkeeping plus one allocation on the Rust side. Everything else —
-the path strings, the `Issue` objects, the summary — is produced when read.
+is C-level bookkeeping plus one allocation on the Rust side. Everything else,
+the path strings, the `Issue` objects and the summary, is produced when read.
 A caller that lets the error propagate pays for none of it.
 
 The whole rejected row went from 3 655 to about 2 400 ns, from 1.8x to 1.2x
 pydantic.
 
-### 5. Cheaper classification — dropped, it would not help
+### 5. Cheaper classification (dropped, it would not help)
 
 `classify` walks up to seven `is_instance_of` checks, so ordering them by what
 payloads actually contain looked promising. Measuring six fields of a single
@@ -232,8 +232,8 @@ type, by that type's position in the chain:
 | `float` | 5th | 248 ns |
 
 If position drove the cost, `float` at fifth would be the most expensive. It is
-the second cheapest. The spread is explained by the work each type needs — `str`
-has to be decoded — and not by how many checks preceded it, so each check must
+the second cheapest. The spread is explained by the work each type needs, since `str`
+has to be decoded, and not by how many checks preceded it, so each check must
 cost very little. Reordering would buy nothing, and the idea is dropped rather
 than implemented on the strength of how plausible it sounded.
 
@@ -282,8 +282,8 @@ the only case that needs one.
 
 ### One thing that was tried and removed
 
-Sizing the output list up front — collecting into a `Vec` and handing it to
-`PyList::new` instead of appending one element at a time — made no difference
+Sizing the output list up front, collecting into a `Vec` and handing it to
+`PyList::new` instead of appending one element at a time, made no difference
 that could be told from run-to-run noise. It costs an allocation, so it was
 taken back out. An unmeasurable change is not an improvement.
 

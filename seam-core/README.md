@@ -4,8 +4,8 @@ The validation engine behind [Seam](https://github.com/angeldevmobile/Seam):
 one schema, every language, no drift.
 
 You write a contract once, as a `.seam` file, and Python, Node and the browser
-validate against **this same compiled engine** — same rules, same errors, same
-answers on the cases that usually differ between languages.
+validate against **this same compiled engine**, with the same rules, the same
+errors and the same answers on the cases that usually differ between languages.
 
 ```rust
 use seam_core::{parse, validate, value::Value, Limits};
@@ -45,7 +45,7 @@ inherits the same answer instead of deriving its own.
 
 The dependency list is empty and meant to stay that way. This crate is loaded
 into Python, Node and a browser bundle, so anything it pulls in, those hosts
-inherit — and it is a library whose entire job is to be trustworthy about
+inherit, and it is a library whose entire job is to be trustworthy about
 untrusted input. Date handling and string formats are written here rather than
 pulled in for the same reason.
 

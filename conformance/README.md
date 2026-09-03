@@ -34,7 +34,7 @@ conformance/
 ```
 
 `expect` is either `"valid"` or an object with `issues`. Each issue asserts
-`path` and `code` only — `message` is not stable and is never asserted.
+`path` and `code` only. `message` is not stable and is never asserted.
 
 Issue order is significant: the spec fixes it as declaration order, then unknown
 keys sorted, depth first.
@@ -57,7 +57,7 @@ point the suite is making.
 JSON cannot express everything the cases need, so two conventions:
 
 - Integers are written as JSON numbers. A runner **must** parse them without
-  going through a double — that is the property being tested. In JavaScript this
+  going through a double, because that is the property being tested. In JavaScript this
   means a JSON parser with `bigint` support, not `JSON.parse`.
 - An absent key is written by omitting it. An explicit null is `null`. These are
   different cases and both appear.
@@ -100,7 +100,7 @@ spellings meet.
 
 `expect.codes` asserts **which codes appeared**, not where or how many times,
 and exists for limits alone. A limit is checked while the document is being
-read, before the value it belongs to exists — that is what makes it a bound on
+read, before the value it belongs to exists. That is what makes it a bound on
 hostile input rather than a report about one. A binding handed bytes therefore
 stops at the first breach and has no path; a binding handed host objects
 finishes the walk and reports each at its own path. The code is what both must
@@ -125,7 +125,7 @@ about what the data says, and a case can express that:
 ```
 
 `host_value` means feed the binding the runtime's own values rather than bytes.
-A binding with no such path — `seam-wasm` takes bytes only, on purpose — skips
+A binding with no such path (`seam-wasm` takes bytes only, on purpose) skips
 these and **says it skipped**, because a case that passes by not running is
 worse than one that fails.
 

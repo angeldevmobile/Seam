@@ -15,7 +15,7 @@ There is no generated mirror type to keep in sync. There is no second validator 
 | **Python** | [`seam-schema`](https://pypi.org/project/seam-schema/) | 3.9+, one `abi3` wheel per platform, generated `TypedDict`s |
 | **Node** | [`seam-schema`](https://www.npmjs.com/package/seam-schema) | 20+, native module, `bigint` for 64-bit, generated TypeScript |
 | **Browser** | [`seam-schema-wasm`](https://www.npmjs.com/package/seam-schema-wasm) | WebAssembly, 55 KiB brotli, bytes only |
-| **JVM** | — | planned, via Panama |
+| **JVM** | none yet | planned, via Panama |
 
 ---
 
@@ -23,7 +23,7 @@ There is no generated mirror type to keep in sync. There is no second validator 
 
 [**seam-demo**](https://github.com/angeldevmobile/seam-demo) is a Python service that sends an
 order and a Node consumer that reads it. The order ID arrives **off by 83**, nothing throws, and
-every system downstream now disagrees with the database — because `id` is a snowflake and
+every system downstream now disagrees with the database, because `id` is a snowflake and
 `JSON.parse` cannot hold an integer past 2^53.
 
 ```
@@ -198,7 +198,7 @@ union Event @tag("type") {
 reason a naive datetime is an error rather than a guess: a union that decided for itself which
 field discriminates would be guessing what the data means.
 
-The tag belongs to the union, so no variant may declare it — that would be two sources of truth
+The tag belongs to the union, so no variant may declare it: that would be two sources of truth
 for one value. It is still carried through to the validated value, it is never reported as an
 unknown field, and a variant is not a level of nesting: an issue inside the chosen variant is
 `latest.amount`, never `latest.created.amount`.
@@ -207,13 +207,13 @@ Both generators pin the tag to a literal, so a type checker narrows on it:
 
 ```typescript
 if (event.type === "created") {
-  event.amount;        // bigint — the compiler knows which variant this is
+  event.amount;        // bigint, and the compiler knows which variant this is
 }
 ```
 
 ```python
 if event["type"] == "created":
-    event["amount"]    # int — mypy knows too
+    event["amount"]    # int, and mypy knows it too
 ```
 
 A tag naming no variant is `unknown_variant`, and it is the *only* issue reported: with no
@@ -246,13 +246,13 @@ npm install seam-schema-wasm   # browsers
 ```
 
 The native packages ship binaries for Linux x64, macOS ARM and Windows x64. Linux means glibc
-2.17 and up — `manylinux2014`, so Ubuntu 14.04 onwards, Debian 8 onwards, RHEL 7 onwards — and
-not musl, so not Alpine. On any other platform `pip install` and `npm install` fail rather than
+2.17 and up, which is `manylinux2014`: Ubuntu 14.04 onwards, Debian 8 onwards, RHEL 7
+onwards. Not musl, so not Alpine. On any other platform `pip install` and `npm install` fail rather than
 falling back, because there is no pure implementation to fall back to; `seam-schema-wasm` runs
 anywhere and is the answer there.
 
-On npm the binary lives in a per-platform package — `seam-schema-linux-x64-gnu` and its two
-siblings — which `seam-schema` pulls in as an optional dependency. That is what keeps the
+On npm the binary lives in a per-platform package, `seam-schema-linux-x64-gnu` and its two
+siblings, which `seam-schema` pulls in as an optional dependency. That is what keeps the
 package you install at 13 KB instead of 1 MB of binaries for machines you are not on. Two
 consequences worth knowing before they bite:
 
@@ -340,7 +340,7 @@ Measured from raw JSON bytes, which is what a service actually holds when a requ
 | array of 100 strings | 13 354 ns | **4 471** | 6 828 |
 
 That is one run, and one run of the flat row is not evidence. Across eight, each pair measured in
-the same session, **a flat payload costs between 0.93x and 1.32x pydantic v2, median 1.10x** —
+the same session, **a flat payload costs between 0.93x and 1.32x pydantic v2, median 1.10x**,
 with Seam ahead in two of them. On a flat payload the two are inside each other's noise, and the
 honest statement is that neither is reliably faster. Nested is about 1.2x and the array row about
 2x, which is where a schema read at runtime costs the most.
@@ -441,8 +441,8 @@ Both need an expression language, and the "Safe" section above promises there is
 is data, so loading one from an untrusted source is a parsing problem rather than a sandboxing
 problem. That promise is worth more than the feature. What a caller actually wants from a custom
 validator is business logic, which belongs in the host, after Seam has guaranteed the shape it
-runs on. Where a cross-field rule is common enough to earn a name it can get one — a closed
-vocabulary like `@requires(other)` states the relationship without evaluating anything — but
+runs on. Where a cross-field rule is common enough to earn a name it can get one. A closed
+vocabulary like `@requires(other)` states the relationship without evaluating anything, but
 never an expression.
 
 **Phase 5: JVM.** Via the Panama FFM API (Java 22+), not JNI. This is honestly a large lift:
@@ -539,14 +539,14 @@ that can break an install that was working.
 **What works today.** A `.seam` file parses, compiles and validates. Python gets an `abi3` wheel
 covering 3.9 and up and generated `TypedDict`s; Node gets a native module, `bigint` where a
 `number` would lie, and generated TypeScript interfaces; the browser gets the same engine as
-WebAssembly at 55 KiB brotli. All three take raw JSON in one call — Python and Node also take a
-dict or object — normalise values on the way out, and build nothing for an error until something
+WebAssembly at 55 KiB brotli. All three take raw JSON in one call (Python and Node also take a
+dict or object), normalise values on the way out, and build nothing for an error until something
 reads it. The conformance suite runs from Rust, Python, Node and WebAssembly against the same 95
 cases, covering every one of the spec's 21 error codes, in CI, on three operating systems. Both
 hand-written parsers are fuzzed on every push.
 
 **What is honest about it.** Framework integration does not exist, and neither do custom
-validators or general cross-field constraints — those two are not "not yet", they are declined,
+validators or general cross-field constraints: those two are not "not yet", they are declined,
 because they need an expression language and the security model promises there is none. There is
 no `@pattern` either, for the same reason. If you work in a single language today, pydantic or
 msgspec is the better tool and this README says so plainly further up. The reason to reach for

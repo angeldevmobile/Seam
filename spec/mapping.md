@@ -104,7 +104,7 @@ Accepted: `Z`, `z`, `±HH:MM`, optional fractional seconds, second value `60`
 ## 5. Strings
 
 UTF-8. `@min_len` and `@max_len` count **Unicode scalar values**, not bytes and
-not UTF-16 code units — so a string's length is the same number in every
+not UTF-16 code units, so a string's length is the same number in every
 binding, which is the only property that makes the constraint portable.
 
 ### 5.1 Formats
@@ -201,7 +201,7 @@ binding must keep all three:
    returned the variant's declared fields alone would hand back an object
    missing its own discriminant.
 3. A variant is **not** a level of nesting. An issue inside the chosen variant
-   is reported at the union's own path — `latest.amount`, never
+   is reported at the union's own path: `latest.amount`, never
    `latest.created.amount`.
 
 Reading the tag:
@@ -245,8 +245,8 @@ produced cannot keep §2, because `JSON.parse` has corrupted anything past 2⁵�
 before validation begins.
 
 A binding **may** also take its host's own values, and the Rust, Python and
-Node bindings do — a Python `dict` and a JavaScript object are useful inputs
-where the payload was built in-process rather than received. Such a path must
+Node bindings do, because a Python `dict` and a JavaScript object are useful
+inputs where the payload was built in-process rather than received. Such a path must
 report `unsafe_integer` rather than validate a number the host already holds
 inexactly.
 
@@ -314,7 +314,7 @@ is non-conformant.
 
 **Two things about a limit are not fixed, because they cannot be.** A limit is
 checked while the document is being read, before the value it belongs to
-exists — that is what makes it a bound on hostile input rather than a report
+exists. That is what makes it a bound on hostile input rather than a report
 about one. So a binding handed bytes stops at the first breach and has no path
 to report, while a binding handed host objects finishes the walk and reports
 each breach at its own path. Neither the **path** nor the **number of issues**
@@ -333,7 +333,7 @@ validator recurse, so exceeding the stack kills the process instead of
 producing an issue, taking every other request in flight with it. Measured, that
 begins somewhere between one and five thousand levels. A request for more is
 silently held at 256 rather than refused, because the caller asking for it has
-not done anything wrong — they have asked for something the machine cannot
+not done anything wrong. They have asked for something the machine cannot
 promise. Every other limit bounds memory, is enforced where it is exceeded, and
 is the caller's to set.
 

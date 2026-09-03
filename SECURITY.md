@@ -25,7 +25,7 @@ a bug report:
 - **No panic crosses the FFI boundary.** A panic reaching Python or Node is a
   Seam bug: those runtimes cannot catch it, and the process is what pays. Both
   hand-written parsers are fuzzed on every push against two million mutated
-  inputs, asserting only that nothing unwinds — rejecting an input is a correct
+  inputs, asserting only that nothing unwinds. Rejecting an input is a correct
   answer, accepting one is a correct answer, panicking is not.
 - **Hostile input is bounded.** Limits on nesting depth, collection length,
   key count, string length and total input size are enforced in the core, so
@@ -53,5 +53,5 @@ These are documented behaviour rather than vulnerabilities:
   into the module. It defaults to 8 MiB.
 - **A wrong verdict is a correctness bug, not a vulnerability.** If Seam accepts
   a payload its schema forbids, or rejects one it allows, please open a normal
-  issue with the case — that is what the conformance suite exists for, and a
+  issue with the case. That is what the conformance suite exists for, and a
   case that reproduces it is the most useful thing you can send.

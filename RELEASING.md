@@ -17,14 +17,14 @@ older `seam-core` would be exactly the drift this project exists to prevent.
 
 Done for `0.1.0`, recorded here because each one has a way of expiring.
 
-1. **crates.io** — a token with `publish-new` and `publish-update`, stored as
+1. **crates.io**: a token with `publish-new` and `publish-update`, stored as
    the `CARGO_REGISTRY_TOKEN` secret. **It expires**; when it does, the release
    fails on authentication and the fix is a new token, not a code change.
-2. **PyPI** — a *trusted publisher* for `angeldevmobile/Seam`, workflow
+2. **PyPI**: a *trusted publisher* for `angeldevmobile/Seam`, workflow
    `release.yml`, environment `release`. No token: PyPI accepts a short-lived
    OIDC token minted per run, which is why the workflow asks for
    `id-token: write`. Nothing here expires.
-3. **npm** — a granular token with *bypass 2FA*, as the `NPM_TOKEN` secret,
+3. **npm**: a granular token with *bypass 2FA*, as the `NPM_TOKEN` secret,
    covering all packages because the five did not exist when it was made.
    **It expires, and it is also on a deadline**: npm is restricting tokens that
    bypass 2FA, with direct publishing cut off in January 2027. See *Migrating
@@ -34,7 +34,7 @@ Done for `0.1.0`, recorded here because each one has a way of expiring.
 
 ## Migrating npm to trusted publishing
 
-Not optional past January 2027, and possible now that the packages exist —
+Not optional past January 2027, and possible now that the packages exist.
 npm has no equivalent of PyPI's "pending publisher", so the first release had
 to use a token.
 
@@ -57,7 +57,7 @@ Nothing is frozen until 1.0."* Publishing `1.0.0` would freeze the error codes
 and the `.seam` grammar, and neither is settled.
 
 Within `0.x`, treat a renamed or removed error code, or a change to which
-condition produces one, as breaking — the spec says so — and bump the minor.
+condition produces one, as breaking, because the spec says so, and bump the minor.
 
 ### 2. Set it in one place per manifest
 
@@ -97,7 +97,7 @@ node scripts/packaging-smoke.mjs
 
 ### 4. Tag
 
-Tag last, and tag `main` as it stands — including the README changes. A tag is
+Tag last, and tag `main` as it stands, including the README changes. A tag is
 the only version of the source anyone can fetch by name, so a doc fix landed
 after it is a fix nobody who checks out `v<version>` will read. `v0.1.1` was
 tagged one commit before the README stopped saying the project was unpublished,
@@ -116,7 +116,7 @@ npm packages.
 
 **Each publish is skipped when that version is already on its registry.** A
 release that fails halfway leaves some registries done and others not, and the
-only sane fix is re-running it — which works only if republishing an existing
+only sane fix is re-running it, which works only if republishing an existing
 version is a no-op rather than an error. `0.1.0` failed twice this way before
 that was true: once on an unverified crates.io email, once on a flag.
 
@@ -131,7 +131,7 @@ requires on its first line. It threw on `require` for anyone who installed it.
 Every test was green.
 
 The direct cause was small: `napi build` writes `native.js`, and the publish
-job never runs it — it only downloads `.node` binaries. The real cause was the
+job never runs it, because it only downloads `.node` binaries. The real cause was the
 gate. `scripts/packaging-smoke.mjs` ran after `npm run build`, so it packed a
 directory that had the file and tested a package **the release never produces**.
 
