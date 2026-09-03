@@ -167,7 +167,7 @@ npx seam typegen --check contracts/*.seam
 npm install seam-schema
 ```
 
-Early development, published at `0.1.2`. **Node 20 or newer**: the compiled
+Early development, published at `0.1.3`. **Node 20 or newer**: the compiled
 module targets Node-API 6 and would run on 18, but the build tool needs 20, and
 a version nothing tests is not a version this claims to support.
 

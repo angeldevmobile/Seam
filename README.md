@@ -490,7 +490,7 @@ If you work in one language, use the native tool. Seam is for the seam between t
 
 ## Status
 
-Early development, published at `0.1.2`. Phases 1 through 3 are done, and phase 4 is partly
+Early development, published at `0.1.3`. Phases 1 through 3 are done, and phase 4 is partly
 done: tagged unions and string formats exist, date/time edge cases do not.
 
 `0.x` means the contract can still move, which is what [`spec/`](spec/) says of itself: nothing
